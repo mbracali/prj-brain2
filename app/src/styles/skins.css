@@ -1,0 +1,200 @@
+/* ==========================================================================
+   Skins. Each skin defines tokens for light and dark. Components only use tokens.
+   Inspired by (not copied from) the Obsidian themes listed in the spec:
+   Typewriter (default), Primary, Blue Topaz.
+   ========================================================================== */
+:root {
+  --font-interface: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-text: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --font-text-size: 16px;
+  --line-height: 1.65;
+  --radius-s: 4px;
+  --radius-m: 8px;
+  --radius-l: 12px;
+  --readable-width: 720px;
+  --sidebar-width: 268px;
+  --right-width: 280px;
+  --h1-size: 1.9em; --h2-size: 1.55em; --h3-size: 1.3em; --h4-size: 1.15em; --h5-size: 1.05em; --h6-size: 1em;
+  --heading-weight: 700;
+  --danger: #e5484d;
+  --success: #30a46c;
+  --warning: #f5a524;
+}
+
+/* ---------------------------------------------------------------- Typewriter */
+:root[data-skin="typewriter"] {
+  --font-text: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --line-height: 1.75;
+  --readable-width: 680px;
+  --h1-size: 1.5em; --h2-size: 1.3em; --h3-size: 1.15em; --h4-size: 1.05em; --h5-size: 1em; --h6-size: 1em;
+  --heading-weight: 600;
+}
+:root[data-skin="typewriter"][data-theme="light"] {
+  --bg-primary: #fbfaf7;
+  --bg-secondary: #f2f0ea;
+  --bg-tertiary: #e9e6de;
+  --bg-hover: rgba(60, 50, 30, 0.06);
+  --bg-active: rgba(60, 50, 30, 0.1);
+  --border: #e2ded4;
+  --text-normal: #2a2925;
+  --text-muted: #6d6a62;
+  --text-faint: #a19d93;
+  --accent: #1a9cf0;
+  --accent-hover: #0c87d6;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(26, 156, 240, 0.12);
+  --text-link: #1a7fc4;
+  --tag-bg: rgba(26, 156, 240, 0.1);
+  --tag-text: #1a7fc4;
+  --highlight-bg: rgba(255, 214, 10, 0.4);
+  --code-bg: #f0ede5;
+  --selection: rgba(26, 156, 240, 0.22);
+  --heading-color: #1d1c19;
+  --h1-color: var(--heading-color); --h2-color: var(--heading-color); --h3-color: var(--heading-color);
+  --h4-color: var(--heading-color); --h5-color: var(--heading-color); --h6-color: var(--text-muted);
+  --shadow: 0 10px 30px rgba(40, 30, 10, 0.14), 0 2px 6px rgba(40, 30, 10, 0.08);
+  --graph-line: rgba(80, 70, 50, 0.25);
+}
+:root[data-skin="typewriter"][data-theme="dark"] {
+  --bg-primary: #1c1c1b;
+  --bg-secondary: #161615;
+  --bg-tertiary: #262624;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: rgba(255, 255, 255, 0.09);
+  --border: #2c2c2a;
+  --text-normal: #d9d6cf;
+  --text-muted: #9a968d;
+  --text-faint: #66635d;
+  --accent: #2fb2ff;
+  --accent-hover: #59c2ff;
+  --accent-text: #0b1620;
+  --accent-soft: rgba(47, 178, 255, 0.14);
+  --text-link: #5cc0ff;
+  --tag-bg: rgba(47, 178, 255, 0.13);
+  --tag-text: #7cccff;
+  --highlight-bg: rgba(255, 214, 10, 0.28);
+  --code-bg: #242422;
+  --selection: rgba(47, 178, 255, 0.25);
+  --heading-color: #ecebe6;
+  --h1-color: var(--heading-color); --h2-color: var(--heading-color); --h3-color: var(--heading-color);
+  --h4-color: var(--heading-color); --h5-color: var(--heading-color); --h6-color: var(--text-muted);
+  --shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.35);
+  --graph-line: rgba(255, 255, 255, 0.16);
+}
+
+/* ---------------------------------------------------------------- Primary */
+:root[data-skin="primary"] {
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+  --heading-weight: 700;
+}
+:root[data-skin="primary"][data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f6f5fb;
+  --bg-tertiary: #ecebf6;
+  --bg-hover: rgba(98, 80, 220, 0.06);
+  --bg-active: rgba(98, 80, 220, 0.11);
+  --border: #e6e4f2;
+  --text-normal: #2c2a3a;
+  --text-muted: #6b6884;
+  --text-faint: #a3a0b8;
+  --accent: #7158e2;
+  --accent-hover: #5f46d4;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(113, 88, 226, 0.12);
+  --text-link: #6a50e0;
+  --tag-bg: #efeafe;
+  --tag-text: #6a50e0;
+  --highlight-bg: #fff1a8;
+  --code-bg: #f4f3fa;
+  --selection: rgba(113, 88, 226, 0.2);
+  --h1-color: #2c2a3a; --h2-color: #6a50e0; --h3-color: #c0478f; --h4-color: #2b8a9e; --h5-color: #b4741d; --h6-color: #6b6884;
+  --shadow: 0 14px 40px rgba(60, 40, 140, 0.16), 0 2px 8px rgba(60, 40, 140, 0.08);
+  --graph-line: rgba(113, 88, 226, 0.25);
+}
+:root[data-skin="primary"][data-theme="dark"] {
+  --bg-primary: #1e1d29;
+  --bg-secondary: #181722;
+  --bg-tertiary: #272636;
+  --bg-hover: rgba(165, 148, 255, 0.07);
+  --bg-active: rgba(165, 148, 255, 0.13);
+  --border: #2d2b3c;
+  --text-normal: #e3e1f0;
+  --text-muted: #a19eb8;
+  --text-faint: #6b6884;
+  --accent: #a594ff;
+  --accent-hover: #b9abff;
+  --accent-text: #17152a;
+  --accent-soft: rgba(165, 148, 255, 0.15);
+  --text-link: #b3a5ff;
+  --tag-bg: rgba(165, 148, 255, 0.16);
+  --tag-text: #c6bbff;
+  --highlight-bg: rgba(255, 221, 87, 0.28);
+  --code-bg: #262534;
+  --selection: rgba(165, 148, 255, 0.25);
+  --h1-color: #f1effa; --h2-color: #b3a5ff; --h3-color: #f28cc4; --h4-color: #6fd0e2; --h5-color: #f3bd6a; --h6-color: #a19eb8;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --graph-line: rgba(165, 148, 255, 0.22);
+}
+
+/* ---------------------------------------------------------------- Blue Topaz */
+:root[data-skin="blue-topaz"] {
+  --font-text: "Source Serif 4", Georgia, serif;
+  --line-height: 1.7;
+  --heading-weight: 600;
+}
+:root[data-skin="blue-topaz"][data-theme="light"] {
+  --bg-primary: #fafcff;
+  --bg-secondary: #edf3fb;
+  --bg-tertiary: #dfe9f6;
+  --bg-hover: rgba(40, 110, 220, 0.07);
+  --bg-active: rgba(40, 110, 220, 0.13);
+  --border: #d9e4f2;
+  --text-normal: #1f2a3a;
+  --text-muted: #5b6b82;
+  --text-faint: #94a3b8;
+  --accent: #2f7ae5;
+  --accent-hover: #1d66cf;
+  --accent-text: #ffffff;
+  --accent-soft: rgba(47, 122, 229, 0.12);
+  --text-link: #2f7ae5;
+  --tag-bg: #dceafe;
+  --tag-text: #1d5fbf;
+  --highlight-bg: #ffe98a;
+  --code-bg: #eef3fa;
+  --selection: rgba(47, 122, 229, 0.2);
+  --h1-color: #1d5fbf; --h2-color: #d9534f; --h3-color: #2e9d6a; --h4-color: #8e5bd6; --h5-color: #d18b1f; --h6-color: #5b6b82;
+  --shadow: 0 14px 40px rgba(20, 60, 130, 0.15), 0 2px 8px rgba(20, 60, 130, 0.08);
+  --graph-line: rgba(47, 122, 229, 0.25);
+}
+:root[data-skin="blue-topaz"][data-theme="dark"] {
+  --bg-primary: #1a202b;
+  --bg-secondary: #141922;
+  --bg-tertiary: #222a37;
+  --bg-hover: rgba(90, 169, 255, 0.07);
+  --bg-active: rgba(90, 169, 255, 0.13);
+  --border: #273142;
+  --text-normal: #dbe4f0;
+  --text-muted: #94a3b8;
+  --text-faint: #5f6d82;
+  --accent: #5aa9ff;
+  --accent-hover: #7dbcff;
+  --accent-text: #0d1724;
+  --accent-soft: rgba(90, 169, 255, 0.14);
+  --text-link: #6cb4ff;
+  --tag-bg: rgba(90, 169, 255, 0.15);
+  --tag-text: #8cc4ff;
+  --highlight-bg: rgba(255, 214, 10, 0.26);
+  --code-bg: #212836;
+  --selection: rgba(90, 169, 255, 0.25);
+  --h1-color: #6cb4ff; --h2-color: #ff7b72; --h3-color: #56d39a; --h4-color: #c39bff; --h5-color: #f2b45a; --h6-color: #94a3b8;
+  --shadow: 0 14px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.35);
+  --graph-line: rgba(90, 169, 255, 0.2);
+}
+
+/* Skin preview swatches in settings */
+[data-skin-preview="typewriter"] .skin-swatch { background: linear-gradient(135deg, #fbfaf7 50%, #1a9cf0 50%); }
+[data-skin-preview="primary"] .skin-swatch { background: linear-gradient(135deg, #f6f5fb 50%, #7158e2 50%); }
+[data-skin-preview="blue-topaz"] .skin-swatch { background: linear-gradient(135deg, #edf3fb 50%, #2f7ae5 50%); }
