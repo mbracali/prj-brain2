@@ -1,10 +1,14 @@
 // Command registry: the command palette, keyboard shortcuts and the native menu all go through here.
-import { copyText, createFolder, createNote, deletePath, openDailyNote, renamePath, revealInOS } from "./actions";
+import { copyText, createBoard, createDrawing, createFolder, createNote, deletePath, openDailyNote, renamePath, revealInOS } from "./actions";
 import { wrapSelection } from "./editor/setup";
 import { api } from "./lib/api";
 import { bridge, modKey } from "./lib/bridge";
 import { getActiveEditor } from "./lib/editorRegistry";
 import { reportError, useApp, useWorkspace } from "./store";
+import { openTerminalHere, useTerminals } from "./terminal/store";
+import { startVaultSync } from "./vaultSync";
+
+const vaultGitUrl = () => useApp.getState().vaults.find((v) => v.id === useWorkspace.getState().vaultId)?.connections?.git?.[0];
 
 export interface Command {
   id: string;
@@ -39,9 +43,24 @@ export function commands(): Command[] {
     { id: "quick-switcher", name: "Quick switcher: open a note", icon: "search", hotkey: `${modKey}+O`, when: inVault, run: () => ws().set({ quickSwitcherOpen: true }) },
     { id: "new-note", name: "Create new note", icon: "edit_square", hotkey: `${modKey}+N`, when: inVault, run: () => createNote() },
     { id: "new-folder", name: "Create new folder", icon: "create_new_folder", when: inVault, run: () => createFolder() },
+    { id: "new-drawing", name: "Create new drawing (Excalidraw)", icon: "draw", when: inVault, run: () => createDrawing() },
+    { id: "new-board", name: "Create new kanban board", icon: "view_kanban", when: inVault, run: () => createBoard() },
+    {
+      id: "font-bigger",
+      name: "Increase font size",
+      icon: "text_increase",
+      run: () => useApp.getState().updateSettings({ fontSize: Math.min(32, useApp.getState().settings.fontSize + 1) }),
+    },
+    {
+      id: "font-smaller",
+      name: "Decrease font size",
+      icon: "text_decrease",
+      run: () => useApp.getState().updateSettings({ fontSize: Math.max(10, useApp.getState().settings.fontSize - 1) }),
+    },
+    { id: "font-reset", name: "Reset font size", icon: "format_size", run: () => useApp.getState().updateSettings({ fontSize: 16 }) },
     { id: "daily-note", name: "Open today's daily note", icon: "today", when: inVault, run: () => openDailyNote() },
     { id: "search", name: "Search in vault", icon: "manage_search", hotkey: `${modKey}+⇧+F`, when: inVault, run: () => ws().set({ leftOpen: true, leftTab: "search" }) },
-    { id: "graph", name: "Open graph view", icon: "hub", hotkey: `${modKey}+G`, when: inVault, run: () => ws().openGraph() },
+    { id: "graph", name: "Open graph view", icon: "graph_3", hotkey: `${modKey}+G`, when: inVault, run: () => ws().openGraph() },
     { id: "toggle-reading", name: "Toggle reading view", icon: "chrome_reader_mode", hotkey: `${modKey}+E`, when: () => !!activeFile(), run: toggleReading },
     {
       id: "toggle-source",
@@ -66,6 +85,16 @@ export function commands(): Command[] {
       run: () => {
         const id = ws().activeId;
         if (id) ws().closeTab(id);
+      },
+    },
+    {
+      id: "pin-tab",
+      name: "Pin / unpin current tab",
+      icon: "keep",
+      when: () => !!ws().activeId,
+      run: () => {
+        const id = ws().activeId;
+        if (id) ws().togglePin(id);
       },
     },
     { id: "rename", name: "Rename file", icon: "edit", when: () => !!activeFile(), run: () => renamePath(activeFile()!, false) },
@@ -94,6 +123,10 @@ export function commands(): Command[] {
         }
       },
     },
+    { id: "toggle-terminal", name: "Toggle terminal panel", icon: "terminal", hotkey: "Ctrl+`", run: () => useTerminals.getState().toggle() },
+    { id: "new-terminal", name: "Open terminal here", icon: "terminal", hotkey: "Ctrl+⇧+`", run: () => openTerminalHere() },
+    { id: "vault-sync", name: "Sync vault with git", icon: "sync", when: () => inVault() && !!vaultGitUrl(), run: () => startVaultSync(ws().vaultId!) },
+    { id: "repos", name: "Open repos", icon: "account_tree", run: () => useApp.getState().navigate({ module: "repos" }) },
     { id: "settings", name: "Open settings", icon: "settings", hotkey: `${modKey}+,`, run: () => useApp.getState().openSettings("general") },
     { id: "new-vault", name: "Create or open a vault", icon: "inventory_2", run: () => useApp.getState().setCreateVaultOpen(true) },
     { id: "vaults", name: "Manage vaults", icon: "inventory_2", run: () => useApp.getState().navigate({ module: "vaults" }) },

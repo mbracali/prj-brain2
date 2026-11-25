@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("brain2", {
   reveal: (fullPath) => ipcRenderer.invoke("brain2:reveal", fullPath),
   openPath: (fullPath) => ipcRenderer.invoke("brain2:open-path", fullPath),
   openExternal: (url) => ipcRenderer.invoke("brain2:open-external", url),
+  trashItem: (fullPath) => ipcRenderer.invoke("brain2:trash", fullPath),
   onMenu: (callback) => {
     const listener = (_event, action, payload) => callback(action, payload);
     ipcRenderer.on("brain2:menu", listener);

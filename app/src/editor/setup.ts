@@ -52,12 +52,26 @@ export const highlightStyle = HighlightStyle.define([
 ]);
 
 export const lineNumbersCompartment = new Compartment();
+export const vimCompartment = new Compartment();
+
+/** Gutter set: line numbers and/or fold arrows (fold arrows let you collapse headings and lists). */
+export function gutters(numbers: boolean, folding: boolean): Extension {
+  return [
+    ...(numbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
+    ...(folding ? [foldGutter({ markerDOM: (open) => {
+      const s = document.createElement("span");
+      s.className = `material-symbols-outlined cm-fold-marker${open ? "" : " folded"}`;
+      s.textContent = open ? "expand_more" : "chevron_right";
+      return s;
+    } })] : []),
+  ];
+}
 export const spellcheckCompartment = new Compartment();
 export const livePreviewCompartment = new Compartment();
 
-export function baseExtensions(opts: { lineNumbers: boolean; spellcheck: boolean; wrap: boolean }): Extension[] {
+export function baseExtensions(opts: { lineNumbers: boolean; folding: boolean; spellcheck: boolean; wrap: boolean }): Extension[] {
   return [
-    lineNumbersCompartment.of(opts.lineNumbers ? [lineNumbers(), highlightActiveLineGutter(), foldGutter()] : []),
+    lineNumbersCompartment.of(gutters(opts.lineNumbers, opts.folding)),
     spellcheckCompartment.of(
       EditorView.contentAttributes.of({ spellcheck: opts.spellcheck ? "true" : "false", autocorrect: "on" }),
     ),

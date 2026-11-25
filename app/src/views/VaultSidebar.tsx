@@ -1,12 +1,17 @@
+import { startVaultSync, useVaultSync } from "../vaultSync";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  changeIcon,
   copyText,
+  createBoard,
+  createDrawing,
   createFolder,
   createNote,
   deletePath,
   movePath,
   renamePath,
   revealInOS,
+  openTerminalAt,
   saveAttachments,
 } from "../actions";
 import { Icon, UserIcon } from "../components/Icon";
@@ -19,6 +24,15 @@ import { vaultMenu } from "../vaultActions";
 
 const DRAG_TYPE = "application/x-brain2-path";
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+function VaultSyncButton({ vaultId }: { vaultId: string }) {
+  const busy = useVaultSync((s) => !!s.busy[vaultId]);
+  return (
+    <button className="icon-button" title="Sync with git" disabled={busy} onClick={() => startVaultSync(vaultId)}>
+      <Icon name="sync" size={19} className={busy ? "spin" : ""} />
+    </button>
+  );
+}
 
 export function VaultSidebar({ vaultId }: { vaultId: string }) {
   const vault = useApp((s) => s.vaults.find((v) => v.id === vaultId));
@@ -44,6 +58,7 @@ export function VaultSidebar({ vaultId }: { vaultId: string }) {
           <span className="sidebar-title">{vault?.name ?? "Vault"}</span>
           <Icon name="unfold_more" size={16} />
         </button>
+        {vault?.connections?.git?.length ? <VaultSyncButton vaultId={vault.id} /> : null}
       </div>
       <div className="panel-tabs">
         {(
@@ -107,6 +122,15 @@ function FileExplorer() {
         <button className="icon-button" title="New folder" onClick={() => createFolder()}>
           <Icon name="create_new_folder" size={18} />
         </button>
+        <button className="icon-button" title="New drawing" onClick={() => createDrawing()}>
+          <Icon name="draw" size={18} />
+        </button>
+        <button className="icon-button" title="New kanban board" onClick={() => createBoard()}>
+          <Icon name="view_kanban" size={18} />
+        </button>
+        <button className="icon-button" title="Graph view" onClick={() => useWorkspace.getState().openGraph()}>
+          <Icon name="graph_3" size={18} />
+        </button>
         <button className="icon-button" title="Collapse all" onClick={() => set({ expanded: {} })}>
           <Icon name="unfold_less" size={18} />
         </button>
@@ -157,14 +181,18 @@ function folderMenu(path: string): MenuItem[] {
   return [
     { label: "New note", icon: "edit_square", action: () => createNote(path) },
     { label: "New folder", icon: "create_new_folder", action: () => createFolder(path) },
+    { label: "New drawing", icon: "draw", action: () => createDrawing(path) },
+    { label: "New kanban board", icon: "view_kanban", action: () => createBoard(path) },
     { separator: true },
     ...(path
       ? [
           { label: "Rename…", icon: "edit", action: () => renamePath(path, true) },
+          { label: "Change icon…", icon: "mood", action: () => changeIcon(path) },
           { label: "Copy path", icon: "content_copy", action: () => copyText(path) },
         ]
       : []),
     { label: "Reveal in file manager", icon: "folder_open", action: () => revealInOS(path) },
+    { label: "Open in terminal", icon: "terminal", action: () => openTerminalAt(path, true) },
     ...(path ? [{ separator: true }, { label: "Delete", icon: "delete", danger: true, action: () => deletePath(path, true) }] : []),
   ];
 }
@@ -182,6 +210,7 @@ function fileMenu(file: TreeFile): MenuItem[] {
     },
     { separator: true },
     { label: "Rename…", icon: "edit", action: () => renamePath(file.path, false) },
+    { label: "Change icon…", icon: "mood", action: () => changeIcon(file.path) },
     {
       label: "Make a copy",
       icon: "file_copy",
@@ -200,24 +229,16 @@ function fileMenu(file: TreeFile): MenuItem[] {
     { label: "Copy path", icon: "content_copy", action: () => copyText(file.path) },
     { label: "Copy wikilink", icon: "link", action: () => copyText(`[[${link}]]`) },
     { label: "Reveal in file manager", icon: "folder_open", action: () => revealInOS(file.path) },
+    { label: "Open folder in terminal", icon: "terminal", action: () => openTerminalAt(file.path, false) },
     { separator: true },
     { label: "Delete", icon: "delete", danger: true, action: () => deletePath(file.path, false) },
   ];
 }
 
-const KIND_ICONS: Record<string, string> = {
-  markdown: "description",
-  pdf: "picture_as_pdf",
-  text: "article",
-  json: "data_object",
-  yaml: "settings_ethernet",
-  image: "image",
-  media: "movie",
-  other: "draft",
-};
 
 function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
   const expanded = useWorkspace((s) => !!s.expanded[node.path]);
+  const icon = useWorkspace((s) => s.icons[node.path]);
   const selected = useWorkspace((s) => s.selected === node.path);
   const activePath = useWorkspace((s) => s.tabs.find((t) => t.id === s.activeId)?.path);
   const [over, setOver] = useState(false);
@@ -271,6 +292,7 @@ function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
           }}
         >
           <Icon name={expanded ? "expand_more" : "chevron_right"} size={16} className="tree-chevron" />
+          {icon && <UserIcon value={icon} fallback="" size={16} />}
           <span className="tree-label">{folder.name}</span>
         </div>
         {expanded && (
@@ -286,6 +308,7 @@ function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
 
   const file = node as TreeFile;
   const isNote = file.kind === "markdown";
+  const label = isNote ? displayName(file.name) : file.kind === "excalidraw" ? file.name.replace(/\.excalidraw(\.md)?$/i, "") : file.name;
   return (
     <div
       ref={ref}
@@ -301,9 +324,9 @@ function TreeItem({ node, depth }: { node: TreeNode; depth: number }) {
         useApp.getState().showMenu(e, fileMenu(file));
       }}
     >
-      <Icon name={KIND_ICONS[file.kind] ?? "draft"} size={16} className="tree-file-icon" />
-      <span className="tree-label">{isNote ? displayName(file.name) : file.name}</span>
-      {!isNote && file.ext && <span className="tree-ext">{file.ext}</span>}
+      {icon && <UserIcon value={icon} fallback="" size={16} />}
+      <span className="tree-label">{label}</span>
+      {file.kind === "excalidraw" ? <span className="tree-ext">draw</span> : !isNote && file.ext && <span className="tree-ext">{file.ext}</span>}
     </div>
   );
 }

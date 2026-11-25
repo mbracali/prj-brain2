@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createNote, openDailyNote } from "../actions";
-import { Icon } from "../components/Icon";
+import { Icon, UserIcon } from "../components/Icon";
+import { Spinner } from "../components/Spinner";
 import { modKey } from "../lib/bridge";
 import { displayName } from "../lib/links";
 import { reportError, useApp, useWorkspace } from "../store";
@@ -45,7 +46,13 @@ export function VaultWorkspace({ vaultId, initialFile }: { vaultId: string; init
       </div>
     );
   }
-  if (loadedFor !== vaultId) return <div className="page center muted">Loading vault…</div>;
+  if (loadedFor !== vaultId) {
+    return (
+      <div className="page center">
+        <Spinner label={`Opening ${vault?.name ?? "vault"}${vault?.file_count ? ` · ${vault.file_count.toLocaleString()} files` : ""}…`} />
+      </div>
+    );
+  }
 
   return (
     <div className="workspace">
@@ -71,6 +78,7 @@ function TabBar() {
   const tabs = useWorkspace((s) => s.tabs);
   const activeId = useWorkspace((s) => s.activeId);
   const dirty = useWorkspace((s) => s.dirty);
+  const icons = useWorkspace((s) => s.icons);
   const leftOpen = useWorkspace((s) => s.leftOpen);
   const rightOpen = useWorkspace((s) => s.rightOpen);
   const ws = useWorkspace.getState;
@@ -85,7 +93,7 @@ function TabBar() {
         {tabs.map((t) => (
           <div
             key={t.id}
-            className={`tab${t.id === activeId ? " active" : ""}`}
+            className={`tab${t.id === activeId ? " active" : ""}${t.pinned ? " pinned" : ""}`}
             draggable
             onDragStart={() => (dragId.current = t.id)}
             onDragOver={(e) => e.preventDefault()}
@@ -97,7 +105,8 @@ function TabBar() {
               const b = list.findIndex((x) => x.id === t.id);
               const [moved] = list.splice(a, 1);
               list.splice(b, 0, moved);
-              ws().set({ tabs: list });
+              // Pinned tabs always stay grouped on the left.
+              ws().set({ tabs: [...list.filter((x) => x.pinned), ...list.filter((x) => !x.pinned)] });
             }}
             onMouseDown={(e) => {
               if (e.button === 1) {
@@ -108,30 +117,56 @@ function TabBar() {
             onContextMenu={(e) => {
               e.preventDefault();
               useApp.getState().showMenu(e, [
-                { label: "Close", icon: "close", action: () => ws().closeTab(t.id) },
+                { label: t.pinned ? "Unpin" : "Pin", icon: "keep", action: () => ws().togglePin(t.id) },
+                { label: "Close", icon: "close", action: () => ws().closeTab(t.id, { force: true }) },
                 {
                   label: "Close others",
                   icon: "tab_close",
-                  action: () => ws().set({ tabs: ws().tabs.filter((x) => x.id === t.id), activeId: t.id }),
+                  action: () => ws().set({ tabs: ws().tabs.filter((x) => x.id === t.id || x.pinned), activeId: t.id }),
                 },
-                { label: "Close all", icon: "tab_close_right", action: () => ws().set({ tabs: [], activeId: null }) },
+                {
+                  label: "Close all",
+                  icon: "tab_close_right",
+                  action: () => {
+                    const keep = ws().tabs.filter((x) => x.pinned);
+                    ws().set({ tabs: keep, activeId: keep.find((x) => x.id === ws().activeId)?.id ?? keep[0]?.id ?? null });
+                  },
+                },
               ]);
             }}
             title={t.path || "Graph view"}
           >
-            <Icon name={t.type === "graph" ? "hub" : "description"} size={15} className="tab-icon" />
-            <span className="tab-title">{t.type === "graph" ? "Graph view" : displayName(t.path)}</span>
+            {t.type === "graph" ? (
+              <Icon name="graph_3" size={15} className="tab-icon" />
+            ) : (
+              icons[t.path] && <UserIcon value={icons[t.path]} fallback="" size={15} />
+            )}
+            <span className="tab-title">{t.type === "graph" ? "Graph view" : displayName(t.path).replace(/\.excalidraw$/i, "")}</span>
             {dirty[t.path] && <span className="tab-dirty" />}
-            <button
-              className="tab-close"
-              onMouseDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation();
-                ws().closeTab(t.id);
-              }}
-            >
-              <Icon name="close" size={14} />
-            </button>
+            {t.pinned ? (
+              <button
+                className="tab-close tab-pin"
+                title="Pinned — click to unpin"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  ws().togglePin(t.id);
+                }}
+              >
+                <Icon name="keep" size={14} />
+              </button>
+            ) : (
+              <button
+                className="tab-close"
+                onMouseDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  ws().closeTab(t.id);
+                }}
+              >
+                <Icon name="close" size={14} />
+              </button>
+            )}
           </div>
         ))}
         <button className="icon-button tab-new" title={`New note (${modKey}+N)`} onClick={() => createNote()}>

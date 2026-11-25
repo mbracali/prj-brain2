@@ -8,13 +8,24 @@ import { markdownCompletions } from "../editor/completions";
 import { livePreview, refreshLivePreview } from "../editor/livePreview";
 import {
   baseExtensions,
+  gutters,
   languageFor,
   lineNumbersCompartment,
   livePreviewCompartment,
   markdownKeymap,
   placeholder,
   spellcheckCompartment,
+  vimCompartment,
 } from "../editor/setup";
+import { KanbanView } from "../kanban/KanbanView";
+import { isKanban } from "../kanban/format";
+import { renderMarkdown } from "../markdown/render";
+import { drawingSvg } from "../excalidraw/load";
+import { Prec } from "@codemirror/state";
+import { vim } from "@replit/codemirror-vim";
+import { Suspense, lazy } from "react";
+
+const ExcalidrawView = lazy(() => import("../excalidraw/ExcalidrawView"));
 import { Icon } from "../components/Icon";
 import { api, rawUrl } from "../lib/api";
 import { bridge, modKey } from "../lib/bridge";
@@ -25,10 +36,8 @@ import type { FileEntry, FileKind, ViewMode } from "../lib/types";
 import { type MenuItem, type Tab, reportError, useApp, useWorkspace } from "../store";
 import { ReadingView, findHeadingLine } from "./ReadingView";
 import { CMEditor as CMEditorHost } from "./CMEditor";
-import { highlightActiveLineGutter, lineNumbers } from "@codemirror/view";
-import { foldGutter } from "@codemirror/language";
 
-const TEXT_KINDS: FileKind[] = ["markdown", "text", "json", "yaml"];
+const TEXT_KINDS: FileKind[] = ["markdown", "text", "json", "yaml", "excalidraw"];
 
 export function FileView({ tab, active }: { tab: Tab; active: boolean }) {
   const file = useWorkspace((s) => s.files.find((f) => f.path === tab.path));
@@ -43,6 +52,7 @@ export function FileView({ tab, active }: { tab: Tab; active: boolean }) {
       </div>
     );
   }
+  if (file.kind === "excalidraw" && tab.mode !== "source") return <DrawingView tab={tab} file={file} />;
   if (TEXT_KINDS.includes(file.kind)) return <TextDocumentView key={tab.id} tab={tab} file={file} active={active} />;
   return <BinaryView tab={tab} file={file} />;
 }
@@ -111,8 +121,9 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
   const vaultId = useWorkspace((s) => s.vaultId)!;
   const resolver = useWorkspace((s) => s.resolver);
   const settings = useApp((s) => s.settings);
-  const isMarkdown = file.kind === "markdown";
-  const mode: ViewMode = isMarkdown ? tab.mode : "source";
+  const isMarkdown = file.kind === "markdown" || (file.kind === "excalidraw" && /\.md$/i.test(file.path));
+  const isDrawingSource = file.kind === "excalidraw";
+  const mode: ViewMode = isMarkdown && !isDrawingSource ? tab.mode : "source";
 
   const [loaded, setLoaded] = useState<{ path: string; content: string; nonce: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -126,6 +137,7 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastEditMode = useRef<ViewMode>(tab.mode === "reading" ? "live" : tab.mode);
   const [focusTarget, setFocusTarget] = useState<{ line: number; nonce: number } | null>(null);
+  const boardRef = useRef(false);
 
   // ---------------------------------------------------------------- persistence
   const save = useCallback(async () => {
@@ -228,7 +240,7 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
       }
       window.clearTimeout(timer.current);
       if (dirty) timer.current = window.setTimeout(save, useApp.getState().settings.autosaveDelay);
-      if (tabModeRef.current === "reading") setText(next);
+      if (tabModeRef.current === "reading" || boardRef.current) setText(next);
       else scheduleTextUpdate(next);
     },
     [save],
@@ -252,12 +264,14 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
   const extensions = useMemo<Extension[]>(() => {
     const ws = useWorkspace.getState;
     const ext: Extension[] = [
+      vimCompartment.of(settings.vimMode ? Prec.highest(vim()) : []),
       ...baseExtensions({
         lineNumbers: isMarkdown ? settings.showLineNumbers : true,
+        folding: isMarkdown ? settings.foldHeadings : true,
         spellcheck: isMarkdown && settings.spellcheck,
         wrap: true,
       }),
-      languageFor(file.kind),
+      languageFor(isMarkdown ? "markdown" : file.kind === "excalidraw" ? "json" : file.kind),
       EditorView.domEventHandlers({
         focus: (_e, view) => setActiveEditor(view),
       }),
@@ -285,6 +299,9 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
                 openLink: (target, newTab) => openLink(target, pathRef.current, newTab),
                 openTag: (tag) => ws().set({ leftOpen: true, leftTab: "search", searchQuery: `tag:${tag}` }),
                 openExternal: (url) => bridge.openExternal(url),
+                render: (md) => renderMarkdown(md, { resolver: ws().resolver, path: pathRef.current }).html,
+                propertiesMode: () => useApp.getState().settings.propertiesInDocument,
+                drawingSvg: (p) => drawingSvg(vaultId, p),
               }),
         ),
         EditorView.domEventHandlers({
@@ -325,15 +342,22 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
     const view = viewRef.current;
     if (!view) return;
     const showNumbers = isMarkdown ? settings.showLineNumbers : true;
+    const folding = isMarkdown ? settings.foldHeadings : true;
     view.dispatch({
       effects: [
-        lineNumbersCompartment.reconfigure(showNumbers ? [lineNumbers(), highlightActiveLineGutter(), foldGutter()] : []),
+        lineNumbersCompartment.reconfigure(gutters(showNumbers, folding)),
+        vimCompartment.reconfigure(settings.vimMode ? Prec.highest(vim()) : []),
         spellcheckCompartment.reconfigure(
           EditorView.contentAttributes.of({ spellcheck: isMarkdown && settings.spellcheck ? "true" : "false", autocorrect: "on" }),
         ),
       ],
     });
-  }, [settings.showLineNumbers, settings.spellcheck, isMarkdown]);
+  }, [settings.showLineNumbers, settings.spellcheck, settings.foldHeadings, settings.vimMode, isMarkdown]);
+
+  // Re-render widgets (tables, properties) when rendering preferences change.
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: refreshLivePreview.of(null) });
+  }, [settings.propertiesInDocument, settings.strictLineBreaks]);
 
   useEffect(() => {
     const view = viewRef.current;
@@ -350,6 +374,9 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
               openLink: (target, newTab) => openLink(target, pathRef.current, newTab),
               openTag: (tag) => ws().set({ leftOpen: true, leftTab: "search", searchQuery: `tag:${tag}` }),
               openExternal: (url) => bridge.openExternal(url),
+              render: (md) => renderMarkdown(md, { resolver: ws().resolver, path: pathRef.current }).html,
+              propertiesMode: () => useApp.getState().settings.propertiesInDocument,
+              drawingSvg: (p) => drawingSvg(vaultId, p),
             }),
       ),
     });
@@ -386,6 +413,8 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
     if (active && mode !== "reading") setActiveEditor(viewRef.current);
   }, [active, mode]);
 
+  useCtrlScrollZoom(scrollRef);
+
   const toggleTask = (line: number, checked: boolean) => {
     const view = viewRef.current;
     if (!view) return;
@@ -419,6 +448,14 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
     );
   }
 
+  const board = isMarkdown && !isDrawingSource && mode !== "source" && !!loaded && isKanban(text || loaded.content);
+  boardRef.current = board;
+  const replaceDoc = (next: string) => {
+    const v = viewRef.current;
+    if (v && v.state.doc.toString() !== next) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: next } });
+  };
+  const kanbanSource = isMarkdown && !isDrawingSource && mode === "source" && isKanban(text);
+
   const words = text.trim() ? (text.replace(/^---[\s\S]*?\n---/, "").match(/\S+/g)?.length ?? 0) : 0;
   const validation = file.kind === "json" ? validateJson(text) : file.kind === "yaml" ? validateYaml(text) : null;
 
@@ -427,18 +464,32 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
       <ViewHeader
         tab={tab}
         actions={
-          isMarkdown && (
-            <button
-              className="icon-button"
-              onClick={toggleReading}
-              title={mode === "reading" ? `Edit (${modKey}+E)` : `Reading view (${modKey}+E)`}
-            >
-              <Icon name={mode === "reading" ? "edit" : "chrome_reader_mode"} size={18} />
+          board ? (
+            <button className="icon-button" onClick={() => setMode("source")} title="Edit as markdown">
+              <Icon name="code" size={18} />
             </button>
+          ) : kanbanSource ? (
+            <button className="icon-button" onClick={() => setMode("live")} title="Open as board">
+              <Icon name="view_kanban" size={18} />
+            </button>
+          ) : isDrawingSource ? (
+            <button className="icon-button" onClick={() => setMode("live")} title="Open as drawing">
+              <Icon name="draw" size={18} />
+            </button>
+          ) : (
+            isMarkdown && (
+              <button
+                className="icon-button"
+                onClick={toggleReading}
+                title={mode === "reading" ? `Edit (${modKey}+E)` : `Reading view (${modKey}+E)`}
+              >
+                <Icon name={mode === "reading" ? "edit" : "chrome_reader_mode"} size={18} />
+              </button>
+            )
           )
         }
         extraMenu={
-          isMarkdown
+          isMarkdown && !isDrawingSource && !board
             ? [
                 { label: "Live preview", icon: mode === "live" ? "check" : "visibility", action: () => setMode("live") },
                 { label: "Source mode", icon: mode === "source" ? "check" : "code", action: () => setMode("source") },
@@ -448,13 +499,16 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
         }
       />
       <div
-        className={`view-content${isMarkdown && settings.readableLineLength ? " readable" : ""}${
-          isMarkdown ? ` mode-${mode}` : " code-file"
+        className={`view-content${isMarkdown && settings.readableLineLength && !board ? " readable" : ""}${
+          board ? " board-view" : isMarkdown && !isDrawingSource ? ` mode-${mode}` : " code-file"
         }`}
         ref={scrollRef}
       >
-        <div className="note-container">
-          {isMarkdown && <InlineTitle path={tab.path} onEnter={() => viewRef.current?.focus()} />}
+        {board && <KanbanView text={text} path={tab.path} onChange={replaceDoc} />}
+        <div className="note-container" style={board ? { display: "none" } : undefined}>
+          {isMarkdown && !isDrawingSource && settings.showInlineTitle && (
+            <InlineTitle path={tab.path} onEnter={() => viewRef.current?.focus()} />
+          )}
           {loaded && mode === "reading" && (
             <ReadingView
               text={text}
@@ -559,6 +613,51 @@ function InlineTitle({ path, onEnter }: { path: string; onEnter: () => void }) {
         }
       }}
     />
+  );
+}
+
+/** Ctrl/⌘ + mouse wheel (or trackpad pinch) changes the document font size. */
+export function useCtrlScrollZoom(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let acc = 0;
+    const onWheel = (e: WheelEvent) => {
+      const app = useApp.getState();
+      if (!(e.ctrlKey || e.metaKey) || !app.settings.ctrlScrollZoom) return;
+      e.preventDefault();
+      acc += e.deltaY;
+      if (Math.abs(acc) < 30) return;
+      const step = acc < 0 ? 1 : -1;
+      acc = 0;
+      const next = Math.max(10, Math.min(32, app.settings.fontSize + step));
+      if (next !== app.settings.fontSize) app.updateSettings({ fontSize: next });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [ref]);
+}
+
+// ============================================================================ drawings
+function DrawingView({ tab, file }: { tab: Tab; file: FileEntry }) {
+  const vaultId = useWorkspace((s) => s.vaultId)!;
+  const setMode = (m: ViewMode) => useWorkspace.getState().setMode(tab.id, m);
+  return (
+    <div className="view view-excalidraw">
+      <ViewHeader
+        tab={tab}
+        actions={
+          <button className="icon-button" onClick={() => setMode("source")} title={/\.md$/i.test(file.path) ? "Edit as markdown" : "Edit as JSON"}>
+            <Icon name="code" size={18} />
+          </button>
+        }
+      />
+      <div className="view-content binary">
+        <Suspense fallback={<div className="view-empty"><div className="spinner" /></div>}>
+          <ExcalidrawView vaultId={vaultId} path={file.path} tabId={tab.id} />
+        </Suspense>
+      </div>
+    </div>
   );
 }
 

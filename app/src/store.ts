@@ -15,7 +15,12 @@ export type Route =
   | { module: "dashboard" }
   | { module: "vaults" }
   | { module: "vault"; vaultId: string }
+  | { module: "repos" }
+  | { module: "repo"; repoId: string; page?: RepoPage; arg?: string }
+  | { module: "calendars" }
   | { module: "coming"; name: string };
+
+export type RepoPage = "files" | "commits" | "pushes" | "branches" | "tags" | "pulls";
 
 export interface MenuItem {
   label?: string;
@@ -55,6 +60,10 @@ interface AppState {
 }
 
 let toastId = 0;
+/** Where the last context menu opened; follow-up popovers (icon picker) appear there. */
+export let lastMenuPos = { x: 200, y: 200 };
+let settingsTimer: number | undefined;
+const pendingSettings: Record<string, unknown> = {};
 
 export const useApp = create<AppState>((set, get) => ({
   settings: DEFAULT_SETTINGS,
@@ -74,7 +83,14 @@ export const useApp = create<AppState>((set, get) => ({
   },
   async updateSettings(patch) {
     set({ settings: { ...get().settings, ...patch } });
-    await api.putSettings(patch as Record<string, unknown>);
+    // Coalesce rapid changes (dragging, ctrl+scroll, typing a font name) into one write.
+    Object.assign(pendingSettings, patch);
+    window.clearTimeout(settingsTimer);
+    settingsTimer = window.setTimeout(() => {
+      const values = { ...pendingSettings };
+      for (const k of Object.keys(pendingSettings)) delete pendingSettings[k];
+      api.putSettings(values).catch(reportError);
+    }, 400);
   },
   async loadVaults() {
     const vaults = await api.listVaults();
@@ -93,6 +109,7 @@ export const useApp = create<AppState>((set, get) => ({
     set({ createVaultOpen: open });
   },
   showMenu(e, items) {
+    lastMenuPos = { x: e.clientX, y: e.clientY };
     set({ contextMenu: { x: e.clientX, y: e.clientY, items } });
   },
   closeMenu() {
@@ -129,6 +146,8 @@ export interface Tab {
   mode: ViewMode;
   back: string[];
   forward: string[];
+  /** Pinned tabs stay at the left, can't be closed by Cmd+W and never get replaced by navigation. */
+  pinned?: boolean;
   /** Line to scroll to after opening (from search/backlinks/outline). */
   focusLine?: number;
   focusHeading?: string;
@@ -139,6 +158,8 @@ interface WorkspaceState {
   vaultId: string | null;
   tree: TreeFolder | null;
   files: FileEntry[];
+  icons: Record<string, string>;
+  loading: boolean;
   resolver: LinkResolver;
   revision: number;
   tabs: Tab[];
@@ -156,9 +177,11 @@ interface WorkspaceState {
   openVault(vaultId: string): Promise<void>;
   closeVault(): void;
   refresh(opts?: { rename?: [string, string] }): Promise<void>;
+  loadIcons(): Promise<void>;
   openFile(path: string, opts?: { newTab?: boolean; line?: number; heading?: string; mode?: ViewMode }): void;
   openGraph(): void;
-  closeTab(id: string): void;
+  closeTab(id: string, opts?: { force?: boolean }): void;
+  togglePin(id: string): void;
   activate(id: string): void;
   setMode(id: string, mode: ViewMode): void;
   goBack(): void;
@@ -195,7 +218,7 @@ function persist(s: WorkspaceState) {
     localStorage.setItem(
       persistKey(s.vaultId),
       JSON.stringify({
-        tabs: s.tabs.map(({ id, type, path, mode }) => ({ id, type, path, mode })),
+        tabs: s.tabs.map(({ id, type, path, mode, pinned }) => ({ id, type, path, mode, ...(pinned ? { pinned } : {}) })),
         activeId: s.activeId,
         expanded: s.expanded,
         leftOpen: s.leftOpen,
@@ -228,6 +251,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   vaultId: null,
   tree: null,
   files: [],
+  icons: {},
+  loading: false,
   resolver: new LinkResolver([]),
   revision: 0,
   tabs: [],
@@ -248,6 +273,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       vaultId,
       tree: null,
       files: [],
+      icons: {},
+      loading: true,
       tabs: [],
       activeId: null,
       expanded: {},
@@ -258,12 +285,22 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       rightOpen: true,
       ...restore(vaultId),
     });
-    await get().refresh();
+    try {
+      await get().refresh();
+    } finally {
+      set({ loading: false });
+    }
     // Drop tabs whose files vanished while the vault was closed.
     const known = new Set(get().files.map((f) => f.path));
     const tabs = get().tabs.filter((t) => t.type !== "file" || known.has(t.path));
     const activeId = tabs.find((t) => t.id === get().activeId)?.id ?? tabs[0]?.id ?? null;
     set({ tabs, activeId });
+  },
+  async loadIcons() {
+    const id = get().vaultId;
+    if (!id) return;
+    const icons = await api.icons(id);
+    if (get().vaultId === id) set({ icons });
   },
   closeVault() {
     persist(get());
@@ -272,11 +309,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   async refresh(opts = {}) {
     const id = get().vaultId;
     if (!id) return;
-    const [tree, files] = await Promise.all([api.tree(id), api.files(id)]);
+    const [tree, files, icons] = await Promise.all([api.tree(id), api.files(id), api.icons(id).catch(() => ({}))]);
     if (get().vaultId !== id) return;
     // Applying a rename in the same update keeps open editors mounted.
     const renamed = opts.rename ? renamePatch(get(), ...opts.rename) : {};
-    set({ tree, files, resolver: new LinkResolver(files.map((f) => f.path)), revision: get().revision + 1, ...renamed });
+    set({ tree, files, icons, resolver: new LinkResolver(files.map((f) => f.path)), revision: get().revision + 1, ...renamed });
     if (opts.rename) persist(get());
   },
   openFile(path, opts = {}) {
@@ -293,7 +330,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     if (existing && !opts.newTab) {
       tabs = s.tabs.map((t) => (t.id === existing.id ? { ...t, ...focus } : t));
       activeId = existing.id;
-    } else if (active && !opts.newTab) {
+    } else if (active && !opts.newTab && !active.pinned) {
       tabs = s.tabs.map((t) =>
         t.id === active.id
           ? {
@@ -322,17 +359,24 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const s = get();
     const existing = s.tabs.find((t) => t.type === "graph");
     if (existing) return set({ activeId: existing.id });
+
     const tab: Tab = { id: newTabId(), type: "graph", path: "", mode: "reading", back: [], forward: [] };
     set({ tabs: [...s.tabs, tab], activeId: tab.id });
     persist(get());
   },
-  closeTab(id) {
+  closeTab(id, opts = {}) {
     const s = get();
     const idx = s.tabs.findIndex((t) => t.id === id);
-    if (idx < 0) return;
+    if (idx < 0 || (s.tabs[idx].pinned && !opts.force)) return;
     const tabs = s.tabs.filter((t) => t.id !== id);
     const activeId = s.activeId === id ? (tabs[idx] ?? tabs[idx - 1])?.id ?? null : s.activeId;
     set({ tabs, activeId });
+    persist(get());
+  },
+  togglePin(id) {
+    const tabs = get().tabs.map((t) => (t.id === id ? { ...t, pinned: !t.pinned } : t));
+    // Pinned tabs first, keeping relative order otherwise.
+    set({ tabs: [...tabs.filter((t) => t.pinned), ...tabs.filter((t) => !t.pinned)] });
     persist(get());
   },
   activate(id) {

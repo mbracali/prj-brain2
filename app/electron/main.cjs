@@ -1,6 +1,6 @@
 // BRAIN2 Electron main process.
 // Starts the Python backend (local mode), creates windows and the native menu.
-const { app, BrowserWindow, Menu, dialog, ipcMain, shell } = require("electron");
+const { app, BrowserWindow, Menu, dialog, ipcMain, session, shell } = require("electron");
 const { spawn } = require("node:child_process");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -181,6 +181,10 @@ function buildMenu() {
         { label: "Toggle left sidebar", accelerator: "CmdOrCtrl+\\", click: () => sendMenu("toggle-left") },
         { label: "Toggle right sidebar", accelerator: "CmdOrCtrl+Shift+\\", click: () => sendMenu("toggle-right") },
         { type: "separator" },
+        // The renderer handles these keys itself (they must work while the terminal has focus).
+        { label: "Toggle terminal", accelerator: "Ctrl+`", registerAccelerator: false, click: () => sendMenu("toggle-terminal") },
+        { label: "New terminal here", accelerator: "Ctrl+Shift+`", registerAccelerator: false, click: () => sendMenu("new-terminal") },
+        { type: "separator" },
         { role: "reload" },
         { role: "toggleDevTools" },
         { type: "separator" },
@@ -215,6 +219,9 @@ ipcMain.handle("brain2:reveal", (_e, fullPath) => {
 ipcMain.handle("brain2:open-path", (_e, fullPath) => {
   if (typeof fullPath === "string" && fs.existsSync(fullPath)) return shell.openPath(fullPath);
 });
+ipcMain.handle("brain2:trash", async (_e, fullPath) => {
+  if (typeof fullPath === "string" && path.isAbsolute(fullPath) && fs.existsSync(fullPath)) await shell.trashItem(fullPath);
+});
 ipcMain.handle("brain2:open-external", (_e, url) => {
   if (typeof url === "string" && /^https?:|^mailto:/.test(url)) shell.openExternal(url);
 });
@@ -246,6 +253,10 @@ if (!gotLock) {
       return;
     }
     buildMenu();
+    // Only grant what the UI needs: installed-font listing (settings), clipboard, fullscreen.
+    const ALLOWED = new Set(["local-fonts", "clipboard-sanitized-write", "clipboard-read", "fullscreen"]);
+    session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(ALLOWED.has(permission)));
+    session.defaultSession.setPermissionCheckHandler((_wc, permission) => ALLOWED.has(permission));
     createWindow();
     app.on("activate", () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

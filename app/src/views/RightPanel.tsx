@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
 import { openLink } from "../actions";
 import { Icon } from "../components/Icon";
+import { Resizer } from "../components/Resizer";
+import { LocalGraph } from "./GraphView";
 import { api } from "../lib/api";
 import { dirname, displayName } from "../lib/links";
 import type { Backlink, FileInfo, Heading, OutLink } from "../lib/types";
 import { useWorkspace } from "../store";
 
-type PanelTab = "backlinks" | "outgoing" | "outline" | "info";
+type PanelTab = "backlinks" | "outgoing" | "outline" | "graph" | "info";
 
 export function RightPanel() {
   const [tab, setTab] = useState<PanelTab>("backlinks");
@@ -18,12 +20,14 @@ export function RightPanel() {
 
   return (
     <aside className="right-panel">
+      <Resizer side="right" />
       <div className="panel-tabs">
         {(
           [
             ["backlinks", "link", "Backlinks"],
             ["outgoing", "call_made", "Outgoing links"],
             ["outline", "toc", "Outline"],
+            ["graph", "graph_3", "Local graph"],
             ["info", "info", "File info"],
           ] as const
         ).map(([id, icon, label]) => (
@@ -32,7 +36,7 @@ export function RightPanel() {
           </button>
         ))}
       </div>
-      <div className="panel-body">
+      <div className={`panel-body${tab === "graph" ? " panel-graph" : ""}`}>
         {!path ? (
           <div className="empty small">No file open.</div>
         ) : tab === "backlinks" ? (
@@ -41,6 +45,8 @@ export function RightPanel() {
           <Outgoing vaultId={vaultId} path={path} revision={revision} />
         ) : tab === "outline" ? (
           <Outline vaultId={vaultId} path={path} revision={revision} />
+        ) : tab === "graph" ? (
+          <LocalGraph path={path} />
         ) : (
           <Info vaultId={vaultId} path={path} revision={revision} />
         )}

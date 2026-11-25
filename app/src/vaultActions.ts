@@ -2,7 +2,10 @@
 import { api } from "./lib/api";
 import { bridge } from "./lib/bridge";
 import type { Vault } from "./lib/types";
-import { type MenuItem, confirmDialog, promptDialog, reportError, useApp, useWorkspace } from "./store";
+import { pickIcon } from "./components/IconPicker";
+import { useTerminals } from "./terminal/store";
+import { startVaultSync } from "./vaultSync";
+import { type MenuItem, confirmDialog, lastMenuPos, promptDialog, reportError, useApp, useWorkspace } from "./store";
 
 export function revealVault(v: Vault) {
   bridge.reveal(v.path);
@@ -20,14 +23,10 @@ export async function renameVault(v: Vault) {
 }
 
 export async function setVaultIcon(v: Vault) {
-  const icon = await promptDialog("Vault icon", {
-    label: "An emoji, or a Material Symbols name (e.g. inventory_2, school, work). Type 'none' to remove it.",
-    value: v.icon ?? "",
-    okLabel: "Save",
-  });
+  const icon = await pickIcon(lastMenuPos, v.icon ?? "");
   if (icon === null) return;
   try {
-    await api.updateVault(v.id, { icon: icon.toLowerCase() === "none" ? "" : icon });
+    await api.updateVault(v.id, { icon });
     await useApp.getState().loadVaults();
   } catch (e) {
     reportError(e);
@@ -65,6 +64,10 @@ export function vaultMenu(v: Vault): MenuItem[] {
     { label: "Rename…", icon: "edit", action: () => renameVault(v) },
     { label: "Change icon…", icon: "mood", action: () => setVaultIcon(v) },
     { label: "Reveal in file manager", icon: "folder_open", action: () => revealVault(v) },
+    { label: "Open in terminal", icon: "terminal", action: () => useTerminals.getState().openAt(v.path, v.name).catch(reportError) },
+    ...(v.connections?.git?.length
+      ? [{ label: "Sync with git", icon: "sync", action: () => startVaultSync(v.id) }]
+      : [{ label: "Connect a git repository…", icon: "cloud_sync", action: () => app.openSettings("vaults") }]),
     {
       label: "Rebuild index",
       icon: "refresh",

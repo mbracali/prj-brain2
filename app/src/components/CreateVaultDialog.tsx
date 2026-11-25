@@ -5,6 +5,7 @@ import { reportError, useApp } from "../store";
 import { Icon } from "./Icon";
 import { IconPicker } from "./IconPicker";
 import { Modal } from "./Modal";
+import { Spinner } from "./Spinner";
 
 export function CreateVaultDialog() {
   const open = useApp((s) => s.createVaultOpen);
@@ -94,6 +95,7 @@ export function CreateVaultDialog() {
           </div>
         </>
       )}
+      {busy && <Spinner label="Creating and indexing the vault… large folders can take a moment." delay={300} />}
       <label className="field-label">Name</label>
       <div className="row">
         <IconPicker value={icon} onChange={setIcon} fallback="inventory_2" />

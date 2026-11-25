@@ -43,6 +43,33 @@ def kind_for_ext(ext: str) -> str:
     return "other"
 
 
+def is_excalidraw(name: str) -> bool:
+    low = name.lower()
+    return low.endswith(".excalidraw") or low.endswith(".excalidraw.md")
+
+
+def excalidraw_text(name: str, content: str) -> tuple[str, list["Link"]]:
+    """Searchable text (and links) of an Excalidraw drawing.
+
+    Supports plain ``.excalidraw`` JSON and Obsidian's ``.excalidraw.md`` format
+    (text elements + embedded file links before the ``%%`` drawing block).
+    """
+    import json as _json
+
+    if name.lower().endswith(".excalidraw.md"):
+        head = content.split("\n%%", 1)[0]
+        head = re.split(r"^#\s+Drawing\s*$", head, maxsplit=1, flags=re.M)[0]
+        note = parse_markdown(head)
+        text = re.sub(r"\s*\^[A-Za-z0-9]{6,}\s*$", "", note.body, flags=re.M)
+        return text, note.links
+    try:
+        data = _json.loads(content)
+        parts = [str(e.get("text", "")) for e in data.get("elements", []) if isinstance(e, dict) and e.get("text")]
+        return "\n".join(parts), []
+    except (ValueError, AttributeError):
+        return "", []
+
+
 def split_ext(name: str) -> tuple[str, str]:
     """('Note.md') -> ('Note', 'md'); unknown extensions stay part of the stem."""
     stem, dot, ext = name.rpartition(".")

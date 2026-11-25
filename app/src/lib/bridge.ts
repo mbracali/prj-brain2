@@ -7,6 +7,7 @@ interface Bridge {
   reveal(fullPath: string): Promise<void>;
   openPath(fullPath: string): Promise<void>;
   openExternal(url: string): Promise<void>;
+  trashItem?(fullPath: string): Promise<void>;
   onMenu(cb: (action: string, payload?: string) => void): () => void;
 }
 

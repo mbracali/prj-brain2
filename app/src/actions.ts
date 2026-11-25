@@ -1,9 +1,13 @@
+import { useTerminals } from "./terminal/store";
 // User-level vault actions shared by the explorer, menus, command palette and editor.
 import { api } from "./lib/api";
 import { bridge } from "./lib/bridge";
 import { basename, dirname, splitExt } from "./lib/links";
+import { pickIcon } from "./components/IconPicker";
+import { emptyDrawingMarkdown } from "./excalidraw/format";
+import { emptyBoardMarkdown } from "./kanban/format";
 import { flushSaves } from "./lib/editorRegistry";
-import { confirmDialog, promptDialog, reportError, useApp, useWorkspace } from "./store";
+import { confirmDialog, lastMenuPos, promptDialog, reportError, useApp, useWorkspace } from "./store";
 
 const ws = () => useWorkspace.getState();
 const app = () => useApp.getState();
@@ -162,6 +166,54 @@ export function absolutePath(rel: string): string | null {
 export function revealInOS(rel: string) {
   const p = absolutePath(rel);
   if (p) bridge.reveal(p);
+}
+
+/** Open (or reuse) a terminal positioned in a vault folder; for a file, its folder. */
+export function openTerminalAt(rel: string, isFolder: boolean) {
+  const folderRel = isFolder ? rel : rel.split("/").slice(0, -1).join("/");
+  const p = absolutePath(folderRel);
+  if (p) useTerminals.getState().openAt(p).catch(reportError);
+}
+
+export async function changeIcon(path: string) {
+  const icon = await pickIcon(lastMenuPos, ws().icons[path] ?? "");
+  if (icon === null) return;
+  try {
+    const icons = await api.setIcon(vaultId(), path, icon);
+    ws().set({ icons });
+  } catch (e) {
+    reportError(e);
+  }
+}
+
+function stamp() {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}`;
+}
+
+/** New Excalidraw drawing, saved in the Obsidian Excalidraw plugin's `.excalidraw.md` format. */
+export async function createDrawing(folder = ws().currentFolder()) {
+  try {
+    const f = await api.createFile(vaultId(), { folder, name: `Drawing ${stamp()}.excalidraw.md`, content: emptyDrawingMarkdown() });
+    await ws().refresh();
+    ws().openFile(f.path);
+  } catch (e) {
+    reportError(e);
+  }
+}
+
+/** New kanban board in the Obsidian Kanban plugin's markdown format. */
+export async function createBoard(folder = ws().currentFolder()) {
+  const name = await promptDialog("New kanban board", { label: "Board name", value: "Board", okLabel: "Create" });
+  if (!name) return;
+  try {
+    const f = await api.createFile(vaultId(), { folder, name: `${name}.md`, content: emptyBoardMarkdown() });
+    await ws().refresh();
+    ws().openFile(f.path);
+  } catch (e) {
+    reportError(e);
+  }
 }
 
 export async function copyText(text: string) {

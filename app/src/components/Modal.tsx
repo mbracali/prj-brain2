@@ -10,7 +10,8 @@ export function Modal({ title, onClose, children, className, footer }: {
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      // Floating pickers/menus above the modal handle Escape themselves.
+      if (e.key === "Escape" && !document.querySelector(".icon-picker-pop, .menu")) {
         e.stopPropagation();
         onClose();
       }

@@ -1,11 +1,16 @@
 import { vaultMenu } from "../vaultActions";
 import { modKey } from "../lib/bridge";
 import { useApp } from "../store";
+import { useRepos } from "../repos/store";
+import { useCalendars } from "../calendars/store";
+import { startVaultSync } from "../vaultSync";
 import { Icon, UserIcon } from "./Icon";
 import { MODULES } from "./Sidebar";
 
 export function Dashboard() {
   const vaults = useApp((s) => s.vaults);
+  const repoCount = useRepos((s) => s.repos.length);
+  const calendarCount = useCalendars((s) => s.calendars.length);
   const navigate = useApp((s) => s.navigate);
   return (
     <div className="page">
@@ -13,18 +18,25 @@ export function Dashboard() {
         <h1 className="page-title">
           <Icon name="neurology" size={34} /> BRAIN2
         </h1>
-        <p className="muted">Your personal assistant harness. Wave 1: vaults.</p>
+        <p className="muted">Your personal assistant harness. Vaults and repos, with a terminal everywhere (Ctrl+`).</p>
         <div className="card-grid">
           {MODULES.map((m) => (
             <button
               key={m.id}
-              className={`card${m.id === "vaults" ? "" : " card-disabled"}`}
-              onClick={() => navigate(m.id === "vaults" ? { module: "vaults" } : { module: "coming", name: m.id })}
+              className={`card${m.id === "vaults" || m.id === "repos" || m.id === "calendars" ? "" : " card-disabled"}`}
+              onClick={() =>
+                navigate(
+                  m.id === "vaults" ? { module: "vaults" }
+                  : m.id === "repos" ? { module: "repos" }
+                  : m.id === "calendars" ? { module: "calendars" }
+                  : { module: "coming", name: m.id },
+                )
+              }
             >
               <Icon name={m.icon} size={26} />
               <strong>{m.label}</strong>
               <span className="muted small">
-                {m.id === "vaults" ? `${vaults.length} local vaults` : "Coming in a next wave"}
+                {m.id === "vaults" ? `${vaults.length} local vaults` : m.id === "repos" ? `${repoCount} local repos` : m.id === "calendars" ? `${calendarCount} calendars` : "Coming in a next wave"}
               </span>
             </button>
           ))}
@@ -86,6 +98,19 @@ export function VaultsHome() {
               <strong>{v.name}</strong>
               <span className="muted small">{v.exists ? `${v.note_count} notes · ${v.file_count} files` : "Folder not found"}</span>
               <span className="muted tiny path">{v.path}</span>
+              {v.connections?.git?.length ? (
+                <span
+                  role="button"
+                  className="btn btn-small card-sync"
+                  title="Sync with git"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    startVaultSync(v.id);
+                  }}
+                >
+                  <Icon name="sync" size={16} /> Sync
+                </span>
+              ) : null}
             </button>
           ))}
         </div>

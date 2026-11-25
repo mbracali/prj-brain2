@@ -10,6 +10,17 @@ The first **Personal Assistant Harness**: vaults, repos, messaging, calendars, b
 
 Requirements: Python ≥ 3.11, Node ≥ 20 (macOS, Linux, Windows 10/11).
 
+**Launch the latest version** with the shortcut in the repo root. It installs missing or outdated
+dependencies and rebuilds the UI when the code changed, then starts the app:
+
+| OS | Shortcut |
+|---|---|
+| macOS | double-click `BRAIN2.command` (or drag it to the Dock / `alias brain2=…/brain2.sh`) |
+| Linux / terminal | `./brain2.sh` (add `--detach` to return to the shell) |
+| Windows | double-click `BRAIN2.bat` |
+
+Or with `make`:
+
 ```bash
 make setup     # backend venv + npm install
 make start     # build the UI and launch the desktop app
@@ -60,9 +71,20 @@ Obsidian-style features:
 - Links update automatically when notes are renamed or moved
 - Backlinks, outgoing links, outline, file info; full-text search (SQLite FTS5) with
   `tag:`, `path:`, `file:` operators; tags pane; graph view; daily notes
+- Live preview renders tables, callouts, properties and code blocks (fences hidden); click to edit the markdown
+- **Kanban boards** in markdown, compatible with the Obsidian Kanban plugin (`kanban-plugin: board`):
+  drag cards and lists, check/archive cards, links and tags inside cards; switch to markdown anytime
+- **Excalidraw drawings**: `.excalidraw` and Obsidian's `.excalidraw.md` (incl. compressed data and
+  embedded images); embed with `![[Drawing.excalidraw]]`. Fonts are bundled — works offline
+- **Graph view** like Obsidian's: filters (tags, attachments, orphans, existing files), color groups
+  by query, arrows / text fade / node size / link thickness, force sliders, plus a **local graph** panel
+- Custom icons for any file or folder (Material Symbols or emoji) — no icon unless you set one
 - Paste / drop images into a note → saved to the attachment folder and embedded
 - External edits (other apps, sync, agents) are picked up live
-- Skins (Options → System settings): **Typewriter** (default), **Primary**, **Blue Topaz**, each light/dark
+- Skins (Options → System settings): **Typewriter** (default), **Primary**, **Blue Topaz**, each light/dark;
+  accent color, interface / text / monospace fonts (installed fonts suggested), font size with
+  ⌘/Ctrl + scroll, optional current-line highlight, line numbers, folding, Vim keys, strict line breaks
+- Resizable sidebars (drag the edge, double-click to reset)
 
 ### Indexing & metadata files
 
@@ -73,6 +95,7 @@ hidden `.brain2/` folder (so your note folders stay clean, like `.obsidian/`):
 <vault>/.brain2/vault.json                       vault identity + connections to other modules
 <vault>/.brain2/index/<path/to/note.md>.json     per document: parent folder, name, description, tags…
 <vault>/.brain2/index/<folder>/__folder__.json   per folder: children + summary
+<vault>/.brain2/icons.json                       custom file/folder icons
 <vault>/.brain2/trash/                           deleted files
 ```
 
@@ -95,3 +118,16 @@ spike-*/   Design spikes (repo organization, resources)
 Free and open source to use, modify and distribute, **with credit to BRAIN2**. Offering it as a
 service is allowed; charging for the code itself or modifications of it is not.
 (Exact license text to be finalized.)
+
+## Repos module and integrated terminal (wave 2)
+
+- **Terminal everywhere**: `Ctrl+`` toggles the bottom terminal panel, `Ctrl+Shift+`` opens one in the folder you're looking at (vault folder, active note's folder, open repo). Terminals run your own login shell (zsh/bash/fish, PowerShell on Windows) in a PTY owned by the backend, so your git, SSH, credential helpers and `gh` auth just work. Tabs survive switching modules.
+- **Everything visible**: clone, init, sync, push, branch/tag operations and vault sync are *typed into* a terminal tab (one tab per repo/vault). The backend detects completion with an invisible `b2done` marker.
+- **Repos**: clone (any https/ssh/file git URL), create a local repo, add an existing clone; per repo: Files (tree, README, contents, history), Commits (graph, filters, diff), Pushes (from the remote-tracking reflog), Branches (Mine/All/Stale, ahead/behind), Tags, Pull requests (GitHub via `gh`).
+- **Vault git sync** (Settings → Vault settings): connect a vault to a repo with a `main` branch; Sync commits on `sync/<user>-<date>`, merges `origin/main`, squash-merges into `main`, pushes and deletes the branch. Conflicts open a dialog: keep mine / theirs / both (line union) / edited manually, or cancel (restores your edits). `.brain2/` (index, trash) is git-ignored.
+
+## Calendars and account connectors (wave 3)
+
+- **Settings → Account connectors** has three groups: *Account providers* (Google, Microsoft, Apple iCloud), *LLM providers* and *Chat providers* (can be connected; not used yet). Secrets live in the OS keychain.
+- Google and Microsoft use browser sign-in (OAuth + PKCE, loopback redirect) with **your own free app registration** (BRAIN2 has no company servers); the setup steps are shown in the app. Apple uses CalDAV with an app-specific password.
+- **Calendars**: create any number; each one combines remote calendars from any number of accounts plus its own local events. Month / Week / Day / Agenda views; background sync every 15 minutes. Remote events are read-only for now.

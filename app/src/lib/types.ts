@@ -1,4 +1,4 @@
-export type FileKind = "markdown" | "pdf" | "text" | "json" | "yaml" | "image" | "media" | "other";
+export type FileKind = "markdown" | "pdf" | "text" | "json" | "yaml" | "excalidraw" | "image" | "media" | "other";
 
 export interface Vault {
   id: string;
@@ -82,48 +82,98 @@ export interface Heading {
 }
 
 export interface GraphData {
-  nodes: { id: string; label: string; kind: string }[];
+  nodes: { id: string; label: string; kind: string; tags?: string[] }[];
   edges: { source: string; target: string; weight: number }[];
 }
 
 export type ViewMode = "live" | "source" | "reading";
 
+export type BaseSkin = "typewriter" | "primary" | "blue-topaz";
+
+/** A user-made theme: a base skin plus colour/font overrides. Exported/imported as JSON. */
+export interface CustomTheme {
+  id: string;
+  name: string;
+  base: BaseSkin;
+  light: Record<string, string>; // CSS token (without --) -> colour
+  dark: Record<string, string>;
+  fonts?: { interface?: string; text?: string; mono?: string };
+}
+
 export interface Settings {
-  skin: "typewriter" | "primary" | "blue-topaz";
+  skin: BaseSkin | `custom:${string}`;
+  customThemes: CustomTheme[];
   colorScheme: "system" | "light" | "dark";
+  accentColor: string; // "" = skin default
+  interfaceFont: string; // "" = skin default
+  textFont: string;
+  monoFont: string;
   fontSize: number;
+  ctrlScrollZoom: boolean;
   readableLineLength: boolean;
   defaultViewMode: ViewMode;
   showLineNumbers: boolean;
+  highlightActiveLine: boolean;
+  showInlineTitle: boolean;
+  propertiesInDocument: "visible" | "hidden" | "source";
+  strictLineBreaks: boolean;
+  vimMode: boolean;
+  foldHeadings: boolean;
   spellcheck: boolean;
+  leftWidth: number;
+  rightWidth: number;
   newNoteLocation: "root" | "current";
   attachmentFolder: string;
   dailyNotesFolder: string;
   confirmDelete: boolean;
   updateLinksOnMove: boolean;
   autosaveDelay: number;
+  /** Last folder used to clone / create repositories. */
+  reposFolder: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   skin: "typewriter",
+  customThemes: [],
   colorScheme: "system",
+  accentColor: "",
+  interfaceFont: "",
+  textFont: "",
+  monoFont: "",
   fontSize: 16,
-  readableLineLength: true,
+  ctrlScrollZoom: true,
+  readableLineLength: false,
   defaultViewMode: "live",
   showLineNumbers: false,
+  highlightActiveLine: false,
+  showInlineTitle: true,
+  propertiesInDocument: "visible",
+  strictLineBreaks: false,
+  vimMode: false,
+  foldHeadings: true,
   spellcheck: true,
+  leftWidth: 268,
+  rightWidth: 280,
   newNoteLocation: "current",
   attachmentFolder: "attachments",
   dailyNotesFolder: "Daily",
   confirmDelete: true,
   updateLinksOnMove: true,
   autosaveDelay: 600,
+  reposFolder: "",
 };
 
 export interface BrainEvent {
-  type: "vaults.changed" | "vault.changed" | "settings.changed";
+  type:
+    | "vaults.changed" | "vault.changed" | "vault.icons" | "settings.changed"
+    | "terminals.changed" | "terminal.job" | "repos.changed" | "repo.changed" | "vault.sync"
+    | "accounts.changed" | "calendars.changed" | "events.changed";
   vault_id?: string;
+  repo_id?: string;
+  terminal_id?: string;
+  job_id?: string;
+  code?: number;
   paths?: string[];
-  origin?: "api" | "fs";
+  origin?: "api" | "fs" | "sync";
   moved?: { from: string; to: string };
 }

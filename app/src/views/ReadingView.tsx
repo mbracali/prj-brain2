@@ -4,6 +4,8 @@ import { api, rawUrl } from "../lib/api";
 import { bridge } from "../lib/bridge";
 import { AUDIO_EXTS, IMAGE_EXTS, VIDEO_EXTS, displayName, extOf } from "../lib/links";
 import { renderMarkdown } from "../markdown/render";
+import { isDrawing } from "../excalidraw/format";
+import { drawingSvg } from "../excalidraw/load";
 import { useWorkspace } from "../store";
 
 const MAX_EMBED_DEPTH = 3;
@@ -54,7 +56,20 @@ async function hydrateEmbeds(root: HTMLElement, vaultId: string, fromPath: strin
       continue;
     }
     const ext = extOf(resolved);
-    if (IMAGE_EXTS.has(ext)) {
+    if (isDrawing(resolved)) {
+      el.classList.add("drawing-embed");
+      el.textContent = "Loading drawing…";
+      drawingSvg(vaultId, resolved)
+        .then((svg) => {
+          el.replaceChildren(svg);
+          el.title = displayName(resolved);
+          el.onclick = (e) => {
+            e.preventDefault();
+            useWorkspace.getState().openFile(resolved, { newTab: e.metaKey || e.ctrlKey });
+          };
+        })
+        .catch(() => (el.textContent = `Could not render ${target}`));
+    } else if (IMAGE_EXTS.has(ext)) {
       const img = document.createElement("img");
       img.src = rawUrl(vaultId, resolved);
       img.alt = alias && !/^\d+(x\d+)?$/.test(alias) ? alias : displayName(resolved);

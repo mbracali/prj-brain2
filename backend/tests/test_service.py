@@ -165,3 +165,40 @@ def test_reregister_keeps_id_and_delete_vault(svc, tmp_path):
     assert again["id"] == v["id"]
     with pytest.raises(VaultError):
         svc.delete_vault(again["id"], delete_files=True)  # external vault files are never deleted
+
+
+def test_icons_follow_moves_and_deletes(svc):
+    v = svc.create_vault("V")
+    vid = v["id"]
+    svc.write_file(vid, "A/n.md", "x")
+    svc.set_icon(vid, "A/n.md", "star")
+    svc.set_icon(vid, "A", "🚀")
+    svc.move(vid, "A", "B")
+    assert svc.get_icons(vid) == {"B": "🚀", "B/n.md": "star"}
+    svc.delete(vid, "B/n.md")
+    assert svc.get_icons(vid) == {"B": "🚀"}
+    svc.set_icon(vid, "B", "")
+    assert svc.get_icons(vid) == {}
+
+
+def test_excalidraw_files(svc):
+    v = svc.create_vault("V")
+    vid = v["id"]
+    svc.write_file(vid, "plain.excalidraw", '{"type":"excalidraw","elements":[{"type":"text","text":"Hello sketch"}]}')
+    md = "---\nexcalidraw-plugin: parsed\n---\n# Text Elements\nBox label ^abc12345\n\n# Embedded files\n[[Note]]\n\n%%\n# Drawing\n```json\n{}\n```\n%%"
+    svc.write_file(vid, "Board.excalidraw.md", md)
+    svc.write_file(vid, "Note.md", "see [[Board.excalidraw]] and [[plain.excalidraw]]")
+    kinds = {f["path"]: f["kind"] for f in svc.list_files(vid)}
+    assert kinds["plain.excalidraw"] == "excalidraw" and kinds["Board.excalidraw.md"] == "excalidraw"
+    assert [r["path"] for r in svc.search(vid, "sketch")] == ["plain.excalidraw"]
+    assert [r["path"] for r in svc.search(vid, "label")] == ["Board.excalidraw.md"]
+    resolved = {l["target"]: l["resolved"] for l in svc.outgoing_links(vid, "Note.md")}
+    assert resolved == {"Board.excalidraw": "Board.excalidraw.md", "plain.excalidraw": "plain.excalidraw"}
+    assert svc.backlinks(vid, "Note.md")[0]["path"] == "Board.excalidraw.md"
+
+
+def test_graph_tags(svc):
+    v = svc.create_vault("V")
+    svc.write_file(v["id"], "a.md", "#topic")
+    g = svc.graph(v["id"], include_tags=True)
+    assert {"source": "a.md", "target": "tag:topic", "weight": 1} in g["edges"]

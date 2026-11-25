@@ -2,7 +2,13 @@ import { revealVault, vaultMenu } from "../vaultActions";
 import { isElectron, isMac } from "../lib/bridge";
 import { useApp } from "../store";
 import { VaultSidebar } from "../views/VaultSidebar";
+import { RepoSidebar } from "../repos/RepoView";
+import { useRepos } from "../repos/store";
+import { useCalendars } from "../calendars/store";
+import { useTerminals } from "../terminal/store";
+import { startVaultSync } from "../vaultSync";
 import { Icon, UserIcon } from "./Icon";
+import { Resizer } from "./Resizer";
 
 export const MODULES = [
   { id: "vaults", label: "Vaults", icon: "inventory_2", unit: "vaults" },
@@ -20,14 +26,25 @@ export function Sidebar() {
   return (
     <aside className={`sidebar${isElectron && isMac ? " has-traffic-lights" : ""}`}>
       <div className="sidebar-drag" />
-      {inVault ? <VaultSidebar vaultId={route.vaultId} /> : sidebar === "vaults" ? <VaultList /> : <ModuleList />}
+      {inVault ? (
+        <VaultSidebar vaultId={route.vaultId} />
+      ) : route.module === "repo" ? (
+        <RepoSidebar repoId={route.repoId} page={route.page ?? "files"} />
+      ) : sidebar === "vaults" ? (
+        <VaultList />
+      ) : (
+        <ModuleList />
+      )}
       <SidebarFooter />
+      <Resizer side="left" />
     </aside>
   );
 }
 
 function ModuleList() {
   const vaults = useApp((s) => s.vaults);
+  const repoCount = useRepos((s) => s.repos.length);
+  const calendarCount = useCalendars((s) => s.calendars.length);
   const navigate = useApp((s) => s.navigate);
   const route = useApp((s) => s.route);
   return (
@@ -37,7 +54,7 @@ function ModuleList() {
       </button>
       <nav className="module-list">
         {MODULES.map((m) => {
-          const count = m.id === "vaults" ? vaults.length : 0;
+          const count = m.id === "vaults" ? vaults.length : m.id === "repos" ? repoCount : m.id === "calendars" ? calendarCount : 0;
           const active = route.module === "coming" ? route.name === m.id : route.module === m.id;
           return (
             <button
@@ -46,7 +63,11 @@ function ModuleList() {
               onClick={() =>
                 m.id === "vaults"
                   ? (useApp.getState().setSidebar("vaults"), navigate({ module: "vaults" }))
-                  : navigate({ module: "coming", name: m.id })
+                  : m.id === "repos"
+                    ? navigate({ module: "repos" })
+                    : m.id === "calendars"
+                      ? navigate({ module: "calendars" })
+                      : navigate({ module: "coming", name: m.id })
               }
             >
               <Icon name={m.icon} size={20} />
@@ -100,6 +121,19 @@ function VaultList() {
                 {v.exists ? `${v.note_count} notes · ${v.file_count} files` : "Folder not found"}
               </span>
             </span>
+            {v.connections?.git?.length ? (
+              <span
+                role="button"
+                className="icon-button vault-item-sync"
+                title="Sync with git"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  startVaultSync(v.id);
+                }}
+              >
+                <Icon name="sync" size={18} />
+              </span>
+            ) : null}
           </button>
         ))}
         {!vaults.length && <div className="empty small">No vaults yet.</div>}
@@ -120,6 +154,10 @@ function SidebarFooter() {
       </button>
       <button className="icon-button" title="Sync & data" onClick={() => openSettings("sync")}>
         <Icon name="sync" size={20} />
+      </button>
+      <span className="spacer" />
+      <button className="icon-button" title="Toggle terminal (Ctrl+`)" onClick={() => useTerminals.getState().toggle()}>
+        <Icon name="terminal" size={20} />
       </button>
     </div>
   );

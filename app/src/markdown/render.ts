@@ -114,11 +114,11 @@ function lineAttrRule(state: StateCore) {
   }
 }
 
-function createMd(): MD {
+function createMd(breaks: boolean): MD {
   const md: MD = new MarkdownIt({
     html: true,
     linkify: true,
-    breaks: true,
+    breaks,
     typographer: false,
     highlight(code, lang) {
       if (lang && hljs.getLanguage(lang)) {
@@ -182,7 +182,11 @@ function createMd(): MD {
   return md;
 }
 
-const md = createMd();
+const mdLoose = createMd(true);
+const mdStrict = createMd(false);
+
+/** App-wide rendering preferences (set from Settings). */
+export const renderDefaults = { strictLineBreaks: false, properties: "visible" as "visible" | "hidden" | "source" };
 
 export const FRONTMATTER_RE = /^---[ \t]*\r?\n([\s\S]*?)\r?\n(?:---|\.\.\.)[ \t]*(?:\r?\n|$)/;
 
@@ -224,18 +228,47 @@ function renderProperties(data: Record<string, unknown>): string {
   return rows ? `<div class="properties"><div class="properties-title">Properties</div>${rows}</div>` : "";
 }
 
-/** Obsidian callouts: `> [!note] Title` blockquotes. */
+export const CALLOUT_COLORS = ["gray", "grey", "blue", "red", "yellow", "gold", "silver", "orange", "purple", "blood", "cyan", "black"];
+/**
+ * BRAIN2 custom callouts: `> [color, material_icon, Label]` (each part may be wrapped in parentheses,
+ * the icon may be empty, and `]+` / `]-` make it foldable like Obsidian callouts).
+ */
+export const CUSTOM_CALLOUT_RE = new RegExp(
+  `^\\[\\s*\\(?\\s*(${CALLOUT_COLORS.join("|")})\\s*\\)?\\s*,\\s*\\(?\\s*([a-z0-9_]*)\\s*\\)?\\s*,\\s*([^\\]\\n]*?)\\s*\\]([+-]?)[ \\t]*([^\\n]*)`,
+  "i",
+);
+
+function parseCalloutHeader(text: string) {
+  const m = /^\[!([\w-]+)\]([+-]?)[ \t]*([^\n]*)/.exec(text);
+  if (m) return { type: m[1].toLowerCase(), fold: m[2], title: m[3], color: null as string | null, icon: calloutIcon(m[1].toLowerCase()), matched: m[0] };
+  const c = CUSTOM_CALLOUT_RE.exec(text);
+  if (!c) return null;
+  let label = c[3].trim();
+  if (/^\(.*\)$/.test(label)) label = label.slice(1, -1).trim();
+  const extra = c[5].trim();
+  return {
+    type: "custom",
+    fold: c[4],
+    title: [label, extra].filter(Boolean).join(" "),
+    color: c[1].toLowerCase() === "grey" ? "gray" : c[1].toLowerCase(),
+    icon: c[2].toLowerCase(),
+    matched: c[0],
+  };
+}
+
+/** Obsidian callouts (`> [!note] Title`) and BRAIN2 custom callouts (`> [blue, rocket_launch, Label]`). */
 function transformCallouts(root: HTMLElement) {
   for (const bq of Array.from(root.querySelectorAll("blockquote"))) {
     const first = bq.firstElementChild;
     if (!first || first.tagName !== "P") continue;
-    const m = /^\[!([\w-]+)\]([+-]?)[ \t]*([^\n]*)/.exec(first.textContent ?? "");
-    if (!m) continue;
-    const type = m[1].toLowerCase();
-    const fold = m[2];
+    const h = parseCalloutHeader(first.textContent ?? "");
+    if (!h) continue;
+    const m = [h.matched, h.type, h.fold, h.title];
+    const type = h.type;
+    const fold = h.fold;
     // Remove the marker text from the first paragraph's first text node.
     const walker = document.createTreeWalker(first, NodeFilter.SHOW_TEXT);
-    let titleHtml = escapeHtml(m[3] || type.charAt(0).toUpperCase() + type.slice(1));
+    let titleHtml = escapeHtml(m[3] || (h.color ? "" : type.charAt(0).toUpperCase() + type.slice(1)));
     const firstText = walker.nextNode() as Text | null;
     if (firstText) {
       const nl = firstText.data.indexOf("\n");
@@ -259,14 +292,20 @@ function transformCallouts(root: HTMLElement) {
     const callout = document.createElement("div");
     callout.className = `callout${fold ? " is-collapsible" : ""}${fold === "-" ? " is-collapsed" : ""}`;
     callout.dataset.callout = type;
+    if (h.color) callout.dataset.calloutColor = h.color;
     for (const [k, v] of Object.entries(bq.dataset)) if (v) callout.dataset[k] = v;
-    callout.innerHTML = `<div class="callout-title"><span class="callout-icon material-symbols-outlined">${calloutIcon(
-      type,
-    )}</span><span class="callout-title-inner">${titleHtml}</span>${
+    const iconHtml = h.icon ? `<span class="callout-icon material-symbols-outlined">${escapeHtml(h.icon)}</span>` : "";
+    callout.innerHTML = `<div class="callout-title">${iconHtml}<span class="callout-title-inner">${titleHtml}</span>${
       fold ? '<span class="callout-fold material-symbols-outlined">expand_more</span>' : ""
     }</div><div class="callout-content"></div>`;
     const content = callout.querySelector(".callout-content")!;
     while (bq.firstChild) content.appendChild(bq.firstChild);
+    // Drop whitespace-only text nodes and a leading empty line left behind by the header.
+    for (const n of Array.from(content.childNodes)) if (n.nodeType === 3 && !n.textContent?.trim()) n.remove();
+    const p0 = content.firstElementChild;
+    p0?.normalize();
+    if (p0?.tagName === "P" && p0.firstChild?.nodeType === 3) (p0.firstChild as Text).data = (p0.firstChild as Text).data.replace(/^\s+/, "");
+    if (!content.childNodes.length) content.remove();
     bq.replaceWith(callout);
   }
 }
@@ -282,8 +321,17 @@ const calloutIcon = (type: string) => CALLOUT_ICONS[type] ?? "edit";
 
 export function renderMarkdown(src: string, env: Omit<RenderEnv, "lineOffset">): { html: string; frontmatter: Record<string, unknown> | null } {
   const { data, body, lines } = splitFrontmatter(src);
+  const md = renderDefaults.strictLineBreaks ? mdStrict : mdLoose;
   const raw = md.render(body, { ...env, lineOffset: lines });
-  const props = data && Object.keys(data).length ? renderProperties(data) : "";
+  const fmSource = src.slice(0, src.length - body.length).trim();
+  const props =
+    renderDefaults.properties === "hidden" || !data
+      ? ""
+      : renderDefaults.properties === "source"
+        ? `<pre class="frontmatter-source"><code>${escapeHtml(fmSource)}</code></pre>`
+        : Object.keys(data).length
+          ? renderProperties(data)
+          : "";
   const clean = DOMPurify.sanitize(props + raw, {
     ADD_ATTR: ["target"],
     FORBID_TAGS: ["style", "form"],

@@ -8,8 +8,8 @@ setup:            ## Install backend (Python venv) and app (npm) dependencies
 dev:              ## Run the desktop app with hot reload
 	cd app && npm run dev
 
-start:            ## Build the UI and run the desktop app
-	cd app && npm start
+start:            ## Launch the latest version (installs/rebuilds only what changed)
+	./brain2.sh
 
 build:            ## Type-check and build the UI
 	cd app && npm run build

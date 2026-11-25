@@ -28,6 +28,8 @@ from typing import Any, Callable, Iterable
 from ..config import Config
 from ..db import Database
 from .markdown import (
+    excalidraw_text,
+    is_excalidraw,
     kind_for_ext,
     link_stem,
     parse_markdown,
@@ -38,7 +40,8 @@ from .markdown import (
 
 META_DIR = ".brain2"
 FOLDER_SIDECAR = "__folder__.json"
-TEXT_KINDS = {"markdown", "text", "json", "yaml"}
+TEXT_KINDS = {"markdown", "text", "json", "yaml", "excalidraw"}
+ICONS_FILE = "icons.json"
 MAX_TEXT_BYTES = 20 * 1024 * 1024
 MAX_FTS_CHARS = 2_000_000
 
@@ -434,9 +437,11 @@ class VaultService:
         name = posixpath.basename(rel)
         stem, ext = split_ext(name)
         if not ext and "." in name:
+            # Unknown extension: keep the full name as stem so [[file.ext]] links resolve.
             ext = name.rsplit(".", 1)[1].lower()
-            stem = name.rsplit(".", 1)[0]
         kind = kind_for_ext(ext)
+        if is_excalidraw(name):
+            kind = "excalidraw"
         folder = posixpath.dirname(rel)
         title, description, frontmatter = None, "", {}
         links, tags, headings = [], [], []
@@ -451,6 +456,9 @@ class VaultService:
                 note = parse_markdown(content)
                 title, description, frontmatter = note.title, note.description, note.frontmatter
                 links, tags, headings = note.links, note.tags, note.headings
+            elif kind == "excalidraw":
+                content, links = excalidraw_text(name, content)
+                description = shorten(" ".join(content.split()), 200) or "Excalidraw drawing"
             else:
                 description = shorten(" ".join(content.split()), 200)
         elif kind == "pdf":
@@ -743,6 +751,7 @@ class VaultService:
         os.replace(sp, dp)
         self.remove_path(vault_id, src)
         self.index_path(vault_id, dst)
+        self._remap_icons(vault_id, src, dst)
 
         changed = [src, dst]
         for note, olds in inbound.items():
@@ -802,6 +811,7 @@ class VaultService:
             shutil.move(str(p), str(dest))
             trashed_to = dest.relative_to(root).as_posix()
         self.remove_path(vault_id, rel)
+        self._remap_icons(vault_id, rel, None)
         self.bus.publish({"type": "vault.changed", "vault_id": vault_id, "paths": [rel], "origin": "api"})
         return {"path": rel, "trashed_to": trashed_to}
 
@@ -818,6 +828,51 @@ class VaultService:
         self.index_path(vault_id, rel)
         self.bus.publish({"type": "vault.changed", "vault_id": vault_id, "paths": [rel], "origin": "api"})
         return {"path": rel, "name": posixpath.basename(rel)}
+
+    # ------------------------------------------------------------------ icons
+    def _icons_path(self, vault_id: str) -> Path:
+        return self.root(vault_id) / META_DIR / ICONS_FILE
+
+    def get_icons(self, vault_id: str) -> dict[str, str]:
+        try:
+            data = json.loads(self._icons_path(vault_id).read_text("utf-8"))
+            return {str(k): str(v) for k, v in data.items() if v}
+        except (OSError, ValueError, AttributeError):
+            return {}
+
+    def _save_icons(self, vault_id: str, icons: dict[str, str]) -> None:
+        target = self._icons_path(vault_id)
+        target.parent.mkdir(exist_ok=True)
+        target.write_text(json.dumps(dict(sorted(icons.items())), indent=2, ensure_ascii=False), "utf-8")
+        self.bus.publish({"type": "vault.icons", "vault_id": vault_id})
+
+    def set_icon(self, vault_id: str, rel: str, icon: str | None) -> dict[str, str]:
+        """Assign an icon (Material Symbol name or emoji) to a file/folder; empty removes it."""
+        rel = norm_rel(rel)
+        if not rel:
+            raise VaultError("A path is required")
+        icons = self.get_icons(vault_id)
+        icon = (icon or "").strip()
+        if len(icon) > 64:
+            raise VaultError("Icon is too long")
+        if icon:
+            icons[rel] = icon
+        else:
+            icons.pop(rel, None)
+        self._save_icons(vault_id, icons)
+        return icons
+
+    def _remap_icons(self, vault_id: str, src: str, dst: str | None) -> None:
+        icons = self.get_icons(vault_id)
+        changed = {}
+        for k, v in icons.items():
+            if k == src or k.startswith(src + "/"):
+                if dst is not None:
+                    changed[dst + k[len(src):]] = v
+            else:
+                changed[k] = v
+        if changed != icons:
+            self._save_icons(vault_id, changed)
 
     # ------------------------------------------------------------------ queries
     def resolve_link(self, vault_id: str, target: str, src_path: str | None = None) -> str | None:
@@ -916,15 +971,19 @@ class VaultService:
         return [dict(r) for r in rows]
 
     def graph(self, vault_id: str, include_attachments: bool = False,
-              include_unresolved: bool = True) -> dict[str, Any]:
+              include_unresolved: bool = True, include_tags: bool = False) -> dict[str, Any]:
         files = self.db.query("SELECT path, stem, kind, title FROM files WHERE vault_id = ?", (vault_id,))
         by_stem: dict[str, list[str]] = {}
         for f in files:
             by_stem.setdefault(f["stem"], []).append(f["path"])
+        file_tags: dict[str, list[str]] = {}
+        for t in self.db.query("SELECT path, tag FROM tags WHERE vault_id = ?", (vault_id,)):
+            file_tags.setdefault(t["path"], []).append(t["tag"])
         nodes = {
-            f["path"]: {"id": f["path"], "label": posixpath.basename(f["path"]).rsplit(".", 1)[0],
-                        "kind": f["kind"]}
-            for f in files if f["kind"] == "markdown" or include_attachments
+            f["path"]: {"id": f["path"], "label": re.sub(r"\.(excalidraw\.md|md|markdown|excalidraw)$", "",
+                                                         posixpath.basename(f["path"]), flags=re.I),
+                        "kind": f["kind"], "tags": file_tags.get(f["path"], [])}
+            for f in files if f["kind"] in ("markdown", "excalidraw") or include_attachments
         }
         edges: dict[tuple[str, str], int] = {}
         for ln in self.db.query("SELECT src_path, target, target_stem FROM links WHERE vault_id = ?",
@@ -938,6 +997,13 @@ class VaultService:
             if dst not in nodes or ln["src_path"] not in nodes or dst == ln["src_path"]:
                 continue
             edges[(ln["src_path"], dst)] = edges.get((ln["src_path"], dst), 0) + 1
+        if include_tags:
+            for t in self.db.query("SELECT DISTINCT path, tag FROM tags WHERE vault_id = ?", (vault_id,)):
+                if t["path"] not in nodes:
+                    continue
+                tid = f"tag:{t['tag'].lower()}"
+                nodes.setdefault(tid, {"id": tid, "label": f"#{t['tag']}", "kind": "tag"})
+                edges[(t["path"], tid)] = 1
         return {"nodes": list(nodes.values()),
                 "edges": [{"source": s, "target": t, "weight": w} for (s, t), w in edges.items()]}
 
@@ -946,14 +1012,22 @@ class VaultService:
         from .watcher import VaultWatcher
 
         self.watcher = VaultWatcher(self)
-        for v in self.list_vaults():
-            if v["exists"]:
+        vaults = [v for v in self.list_vaults() if v["exists"]]
+        for v in vaults:
+            self.watcher.watch(v["id"], Path(v["path"]))
+        self.watcher.start()
+
+        # Catch up on changes made while BRAIN2 was closed without blocking startup.
+        def catch_up() -> None:
+            for v in vaults:
                 try:
                     self.index_vault(v["id"])
+                    self.bus.publish({"type": "vault.changed", "vault_id": v["id"], "paths": [],
+                                      "origin": "fs"})
                 except Exception:
                     pass
-                self.watcher.watch(v["id"], Path(v["path"]))
-        self.watcher.start()
+
+        threading.Thread(target=catch_up, name="brain2-catch-up", daemon=True).start()
 
     def stop_watching(self) -> None:
         if self.watcher:
