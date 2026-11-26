@@ -16,6 +16,18 @@ export interface ProviderInfo {
   usable: boolean; // false = "not used by BRAIN2 yet"
   detected?: string | null; // CLI providers: path of the detected executable
   help: string;
+  /** This build ships its own sign-in client for the provider (no setup needed). */
+  builtin?: boolean;
+  /** The user entered their own app credentials (they win over the built-in client). */
+  own_app?: boolean;
+}
+
+export interface DetectedProvider {
+  provider: "google" | "microsoft" | "apple" | null;
+  custom_domain: boolean;
+  email: string;
+  /** BRAIN2 can sign in to this provider right away. */
+  ready?: boolean;
 }
 
 export interface Account {
@@ -44,6 +56,8 @@ export interface OAuthStatus {
   state: "pending" | "done" | "error";
   account?: Account;
   error?: string;
+  /** e.g. "You signed in as X, not Y". */
+  note?: string;
 }
 
 export interface RemoteCalendar {

@@ -22,6 +22,7 @@ import httpx
 from ..db import Database
 from ..gitcli import which
 from . import providers as P
+from .builtin import builtin_client, detect_provider
 from .secrets import SecretStore
 
 SCHEMA = """
@@ -65,12 +66,20 @@ class AccountService:
             db._conn.executescript(SCHEMA)  # noqa: SLF001
 
     # ---------------------------------------------------------------- providers
-    def provider_config(self, provider: str) -> dict[str, str]:
+    def _own_config(self, provider: str) -> dict[str, str]:
         cfg = dict(self.db.get_settings().get(f"connectors.{provider}") or {})
         secret = self.secrets.get(f"provider:{provider}:client_secret")
         if secret:
             cfg["client_secret"] = secret
         return cfg
+
+    def provider_config(self, provider: str) -> dict[str, str]:
+        """The user's own app credentials when set, otherwise the client built into this BRAIN2 build."""
+        own = self._own_config(provider)
+        if own.get("client_id"):
+            return own
+        builtin = builtin_client(provider)
+        return {**own, **builtin} if builtin else own
 
     def configure(self, provider: str, values: dict[str, str]) -> dict[str, Any]:
         info = P.BY_ID.get(provider)
@@ -113,6 +122,8 @@ class AccountService:
                 "connect": info["connect"], "needs_setup": info["needs_setup"], "configured": self._configured(info),
                 "config": cfg, "usable": info["usable"], "help": info["help"],
                 "detected": which(info["cli"]) if info.get("cli") else None,
+                "builtin": bool(info["id"] in P.OAUTH and builtin_client(info["id"])),
+                "own_app": bool(cfg.get("client_id")),
             })
         return {"providers": providers, "accounts": self.list_accounts(), "keychain": self.secrets.label}
 
@@ -197,7 +208,13 @@ class AccountService:
                             {"home": home, "server": base})
 
     # ---------------------------------------------------------------- OAuth
-    def start_oauth(self, provider: str, nickname: str | None = None) -> dict[str, str]:
+    def detect(self, email: str) -> dict[str, Any]:
+        """Which provider hosts this email, and whether BRAIN2 can sign in to it right away."""
+        found = detect_provider(email)
+        info = P.BY_ID.get(found["provider"] or "")
+        return {**found, "ready": bool(info and self._configured(info))}
+
+    def start_oauth(self, provider: str, nickname: str | None = None, login_hint: str | None = None) -> dict[str, str]:
         if provider not in P.OAUTH:
             raise AccountError("This provider does not use browser sign-in")
         info = P.BY_ID[provider]
@@ -211,12 +228,14 @@ class AccountService:
         host = P.OAUTH[provider]["redirect_host"]
         redirect_uri = f"http://{host}:{server.port}" + ("/" if provider == "google" else "")
         flow = {"provider": provider, "config": cfg, "verifier": verifier, "state": state, "redirect_uri": redirect_uri,
-                "nickname": nickname, "status": "pending", "created": time.time(), "server": server}
+                "nickname": nickname, "status": "pending", "created": time.time(), "server": server,
+                "login_hint": (login_hint or "").strip().lower() or None}
         with self._lock:
             self._gc_flows()
             self._flows[flow_id] = flow
         server.start()
-        return {"flow_id": flow_id, "auth_url": P.auth_url(provider, cfg, redirect_uri, state, challenge)}
+        return {"flow_id": flow_id,
+                "auth_url": P.auth_url(provider, cfg, redirect_uri, state, challenge, flow["login_hint"])}
 
     def _gc_flows(self) -> None:
         for fid, f in list(self._flows.items()):
@@ -236,6 +255,8 @@ class AccountService:
         out: dict[str, Any] = {"state": f["status"]}
         if f["status"] == "done":
             out["account"] = f["account"]
+            if f.get("note"):
+                out["note"] = f["note"]
         if f["status"] == "error":
             out["error"] = f.get("error")
         return out
@@ -258,6 +279,10 @@ class AccountService:
                 email = P.profile_email(f["provider"], tokens["access_token"], client)
             account = self._insert(f["provider"], f["nickname"], email, tokens)
             f.update(status="done", account=account)
+            hint = f.get("login_hint")
+            if hint and email and email.lower() != hint:
+                f["note"] = f"You signed in as {email}, not {hint}. That account was connected."
+                return True, f["note"]
             return True, f"Connected {email or account['nickname']}."
         except Exception as e:  # noqa: BLE001 - surfaced to the user
             f.update(status="error", error=str(e))

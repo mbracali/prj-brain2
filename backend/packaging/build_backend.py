@@ -9,6 +9,7 @@ does not cross-compile): CI builds it once per platform.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -19,7 +20,8 @@ BACKEND = HERE.parent
 
 # Packages that load parts of themselves dynamically (uvicorn protocols, keyring backends, tz data…).
 COLLECT_ALL = ["uvicorn", "keyring", "icalendar", "recurring_ical_events", "x_wr_timezone", "tzdata"]
-COLLECT_SUBMODULES = ["brain2", "websockets", "watchdog", "httpx", "anyio"]
+COLLECT_SUBMODULES = ["brain2", "websockets", "watchdog", "httpx", "anyio", "dns"]
+OAUTH_CLIENTS = BACKEND / "brain2" / "accounts" / "oauth_clients.json"
 HIDDEN = (["winpty"] if sys.platform == "win32" else ["ptyprocess"]) + (
     ["keyring.backends.macOS"] if sys.platform == "darwin" else
     ["keyring.backends.Windows"] if sys.platform == "win32" else
@@ -46,6 +48,11 @@ def main() -> None:
         cmd += ["--collect-submodules", pkg]
     for mod in HIDDEN:
         cmd += ["--hidden-import", mod]
+    if OAUTH_CLIENTS.exists():
+        # Built-in sign-in clients (written from CI secrets; never committed).
+        cmd += ["--add-data", f"{OAUTH_CLIENTS}{os.pathsep}brain2/accounts"]
+    else:
+        print("note: no brain2/accounts/oauth_clients.json — this build has no built-in Google sign-in", flush=True)
     if sys.platform == "darwin":
         # Same bundle id family as the app: keychain items stay attributed to BRAIN2.
         cmd += ["--osx-bundle-identifier", "app.brain2.server"]

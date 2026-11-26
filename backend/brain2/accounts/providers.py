@@ -34,7 +34,7 @@ PROVIDERS: list[dict[str, Any]] = [
         "id": "google", "kind": "account", "name": "Google", "icon": "mail", "connect": "oauth", "needs_setup": True,
         "usable": True, "config_fields": ["client_id", "client_secret"],
         "help": (
-            "BRAIN2 is free and has no company servers, so you use your own (free) Google OAuth app: "
+            "Use your own (free) Google OAuth app: "
             "Google Cloud Console → APIs & Services → enable “Google Calendar API” → Credentials → Create credentials → "
             "OAuth client ID → Application type “Desktop app”. Paste its Client ID and Client secret here. "
             "On the OAuth consent screen add yourself as a test user."
@@ -101,7 +101,8 @@ def pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-def auth_url(provider: str, config: dict[str, str], redirect_uri: str, state: str, challenge: str) -> str:
+def auth_url(provider: str, config: dict[str, str], redirect_uri: str, state: str, challenge: str,
+             login_hint: str | None = None) -> str:
     o = OAUTH[provider]
     tenant = config.get("tenant") or "common"
     params = {
@@ -113,9 +114,13 @@ def auth_url(provider: str, config: dict[str, str], redirect_uri: str, state: st
         "code_challenge": challenge,
         "code_challenge_method": "S256",
     }
+    # With an email hint the provider opens straight on that account (no account chooser).
+    if login_hint:
+        params["login_hint"] = login_hint
     if provider == "google":
-        params.update({"access_type": "offline", "prompt": "consent select_account", "include_granted_scopes": "true"})
-    else:
+        params.update({"access_type": "offline", "include_granted_scopes": "true",
+                       "prompt": "consent" if login_hint else "consent select_account"})
+    elif not login_hint:
         params["prompt"] = "select_account"
     return o["auth"].format(tenant=tenant) + "?" + urlencode(params)
 

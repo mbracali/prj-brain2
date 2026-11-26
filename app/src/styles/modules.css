@@ -259,3 +259,10 @@
 .provider-choice-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .connector-flow { display: flex; flex-direction: column; gap: 12px; }
 .connector-flow > p { margin: 0; line-height: 1.5; }
+
+/* Add account: email first */
+.email-start { display: flex; gap: 8px; align-items: flex-end; }
+.email-start .connector-field { flex: 1; margin: 0; }
+.email-start-or { display: flex; align-items: center; gap: 10px; margin: 18px 0 4px; text-transform: uppercase; letter-spacing: .06em; }
+.email-start-or::before, .email-start-or::after { content: ""; flex: 1; border-top: 1px solid var(--border); }
+.warning-text { color: var(--accent); }

@@ -204,3 +204,54 @@ def test_llm_and_chat_connectors(client):
     assert client.secrets.get(f"account:{acc['id']}") == "sk-ant-x"
     assert "sk-ant" not in json.dumps(client.get("/api/connectors").json())
     assert client.post("/api/accounts/secret", json={"provider": "google", "secret": "x"}).status_code == 400
+
+
+def test_builtin_google_client_and_email_hint(client, monkeypatch):
+    monkeypatch.setenv("BRAIN2_GOOGLE_CLIENT_ID", "builtin-id")
+    monkeypatch.setenv("BRAIN2_GOOGLE_CLIENT_SECRET", "gsecret")
+    google = next(p for p in client.get("/api/connectors").json()["providers"] if p["id"] == "google")
+    assert google["configured"] and google["builtin"] and not google["own_app"]
+    assert "builtin-id" not in json.dumps(google)  # the built-in client is never echoed to the UI
+
+    det = client.post("/api/accounts/detect", json={"email": " Me@Gmail.com "}).json()
+    assert det == {"provider": "google", "custom_domain": False, "email": "me@gmail.com", "ready": True}
+
+    flow = client.post("/api/accounts/oauth/start", json={"provider": "google", "login_hint": "me@gmail.com"}).json()
+    q = parse_qs(urlparse(flow["auth_url"]).query)
+    assert q["client_id"] == ["builtin-id"] and q["login_hint"] == ["me@gmail.com"] and q["prompt"] == ["consent"]
+    httpx.get(q["redirect_uri"][0], params={"code": "the-code", "state": q["state"][0]})
+    st = client.get(f"/api/accounts/oauth/{flow['flow_id']}").json()
+    assert st["state"] == "done" and "note" not in st
+
+    # The user's own app credentials win over the built-in client.
+    client.put("/api/connectors/google/config", json={"client_id": "own-id", "client_secret": "gsecret"})
+    flow = client.post("/api/accounts/oauth/start", json={"provider": "google"}).json()
+    q = parse_qs(urlparse(flow["auth_url"]).query)
+    assert q["client_id"] == ["own-id"] and "login_hint" not in q and q["prompt"] == ["consent select_account"]
+
+
+def test_oauth_signed_in_as_another_account(client, monkeypatch):
+    monkeypatch.setenv("BRAIN2_GOOGLE_CLIENT_ID", "builtin-id")
+    monkeypatch.setenv("BRAIN2_GOOGLE_CLIENT_SECRET", "gsecret")
+    flow = client.post("/api/accounts/oauth/start", json={"provider": "google", "login_hint": "work@company.com"}).json()
+    q = parse_qs(urlparse(flow["auth_url"]).query)
+    httpx.get(q["redirect_uri"][0], params={"code": "the-code", "state": q["state"][0]})
+    st = client.get(f"/api/accounts/oauth/{flow['flow_id']}").json()
+    assert st["state"] == "done" and st["account"]["email"] == "me@gmail.com"
+    assert "me@gmail.com" in st["note"] and "work@company.com" in st["note"]
+
+
+def test_detect_provider_from_email():
+    from brain2.accounts.builtin import detect_provider
+
+    mx = {"acme.com": ["aspmx.l.google.com"], "contoso.com": ["contoso-com.mail.protection.outlook.com"],
+          "fam.ly": ["mx01.mail.icloud.com"], "other.org": ["mail.other.org"]}
+    look = lambda d: mx.get(d, [])  # noqa: E731
+    assert detect_provider("a@gmail.com", look)["provider"] == "google"
+    assert detect_provider("a@hotmail.com", look)["provider"] == "microsoft"
+    assert detect_provider("a@icloud.com", look)["provider"] == "apple"
+    assert detect_provider("a@acme.com", look) == {"provider": "google", "custom_domain": True, "email": "a@acme.com"}
+    assert detect_provider("a@contoso.com", look)["provider"] == "microsoft"
+    assert detect_provider("a@fam.ly", look)["provider"] == "apple"
+    assert detect_provider("a@other.org", look)["provider"] is None
+    assert detect_provider("not-an-email", look)["provider"] is None

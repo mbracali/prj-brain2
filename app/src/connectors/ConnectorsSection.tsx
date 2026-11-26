@@ -101,6 +101,9 @@ function SetupForm({ provider, onSaved }: { provider: ProviderInfo; onSaved: () 
   return (
     <div className="connector-setup">
       <p className="muted small">{provider.help}</p>
+      {provider.builtin && (
+        <p className="muted small">Optional. Leave the Client ID empty to use BRAIN2's built-in sign-in.</p>
+      )}
       {fields.map((f) => (
         <label key={f} className="connector-field">
           <span>{FIELD_LABEL[f]}</span>
@@ -132,15 +135,34 @@ function SetupForm({ provider, onSaved }: { provider: ProviderInfo; onSaved: () 
   );
 }
 
-function OAuthConnect({ provider, onDone }: { provider: ProviderInfo; onDone: () => void }) {
+function OAuthConnect({
+  provider,
+  onDone,
+  email,
+  autoStart = false,
+}: {
+  provider: ProviderInfo;
+  onDone: () => void;
+  /** Open the provider's sign-in straight on this account. */
+  email?: string;
+  autoStart?: boolean;
+}) {
   const [waiting, setWaiting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
+  const started = useRef(false);
   useEffect(() => () => window.clearInterval(timer.current), []);
+  useEffect(() => {
+    if (autoStart && provider.configured && !started.current) {
+      started.current = true;
+      start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoStart, provider.configured]);
   const start = async () => {
     setError(null);
     try {
-      const flow = await accountsApi.startOAuth(provider.id);
+      const flow = await accountsApi.startOAuth(provider.id, undefined, email);
       setWaiting(flow.flow_id);
       await bridge.openExternal(flow.auth_url);
       timer.current = window.setInterval(async () => {
@@ -150,7 +172,7 @@ function OAuthConnect({ provider, onDone }: { provider: ProviderInfo; onDone: ()
         setWaiting(null);
         if (st.state === "error") setError(st.error ?? "Sign-in failed");
         else {
-          useApp.getState().toast(`Connected ${st.account?.email ?? provider.name}`);
+          useApp.getState().toast(st.note ?? `Connected ${st.account?.email ?? provider.name}`);
           onDone();
         }
       }, 1500);
@@ -166,8 +188,8 @@ function OAuthConnect({ provider, onDone }: { provider: ProviderInfo; onDone: ()
           <button className="btn btn-small" onClick={() => (window.clearInterval(timer.current), setWaiting(null))}>Cancel</button>
         </div>
       ) : (
-        <button className="btn btn-small" disabled={!provider.configured} onClick={start}>
-          <Icon name="add_link" size={16} /> Connect {provider.name} account
+        <button className="btn btn-primary btn-small" disabled={!provider.configured} onClick={start}>
+          <Icon name="login" size={16} /> {email ? `Sign in as ${email}` : `Connect ${provider.name} account`}
         </button>
       )}
       {error && <div className="danger-text small">{error}</div>}
@@ -175,9 +197,9 @@ function OAuthConnect({ provider, onDone }: { provider: ProviderInfo; onDone: ()
   );
 }
 
-function AppleConnect({ onDone, startOpen = false }: { onDone: () => void; startOpen?: boolean }) {
+function AppleConnect({ onDone, startOpen = false, email = "" }: { onDone: () => void; startOpen?: boolean; email?: string }) {
   const [open, setOpen] = useState(startOpen);
-  const [appleId, setAppleId] = useState("");
+  const [appleId, setAppleId] = useState(email);
   const [password, setPassword] = useState("");
   const [nickname, setNickname] = useState("");
   const [busy, setBusy] = useState(false);
@@ -269,7 +291,45 @@ function SecretConnect({ provider, onDone, startOpen = false }: { provider: Prov
   );
 }
 
-/** "Add account" flow: pick a provider of the group, then connect it. */
+/** "Add account" first step: type an email, BRAIN2 finds the provider (Google, Microsoft, iCloud). */
+function EmailStart({ onFound }: { onFound: (provider: string | null, email: string) => void }) {
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const go = async () => {
+    if (!valid || busy) return;
+    setBusy(true);
+    try {
+      const d = await accountsApi.detect(email.trim());
+      onFound(d.provider, d.email);
+    } catch (e) {
+      reportError(e);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="email-start">
+      <label className="connector-field">
+        <span>Email address</span>
+        <input
+          className="input"
+          type="email"
+          autoFocus
+          placeholder="you@gmail.com"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && go()}
+        />
+      </label>
+      <button className="btn btn-primary" disabled={!valid || busy} onClick={go}>
+        {busy ? "Checking…" : "Continue"}
+      </button>
+    </div>
+  );
+}
+
+/** "Add account" flow: type an email (account providers) or pick a provider, then connect it. */
 function AddAccountDialog({
   kind,
   title,
@@ -286,6 +346,20 @@ function AddAccountDialog({
   const [pickedId, setPickedId] = useState<string | null>(providers.length === 1 ? providers[0].id : null);
   const picked = providers.find((p) => p.id === pickedId) ?? null;
   const [setup, setSetup] = useState(false);
+  const [email, setEmail] = useState<string | undefined>(undefined);
+  const [unknown, setUnknown] = useState<string | null>(null);
+  const emailFirst = kind === "account";
+  const onFound = (provider: string | null, address: string) => {
+    const p = providers.find((x) => x.id === provider);
+    if (!p) {
+      setUnknown(address);
+      return;
+    }
+    setUnknown(null);
+    setEmail(address);
+    setPickedId(p.id);
+    setSetup(p.needs_setup && !p.configured);
+  };
   const done = () => {
     onChanged();
     onClose();
@@ -295,7 +369,7 @@ function AddAccountDialog({
       title={
         <>
           {picked && providers.length > 1 && (
-            <button className="icon-button" title="Choose another provider" onClick={() => (setPickedId(null), setSetup(false))}>
+            <button className="icon-button" title="Back" onClick={() => (setPickedId(null), setSetup(false), setEmail(undefined))}>
               <Icon name="arrow_back" size={18} />
             </button>
           )}
@@ -308,10 +382,28 @@ function AddAccountDialog({
     >
       {!picked ? (
         <>
-          <p className="muted small">Choose a provider. You can add several accounts of the same provider — each one is listed separately.</p>
+          {emailFirst && (
+            <>
+              <p className="muted small">Type the email of the account you want to connect. You can add as many accounts as you like.</p>
+              <EmailStart onFound={onFound} />
+              {unknown && (
+                <p className="small warning-text">
+                  BRAIN2 couldn't tell who hosts {unknown}. Choose the provider below.
+                </p>
+              )}
+              <div className="email-start-or muted tiny">or choose a provider</div>
+            </>
+          )}
+          {!emailFirst && (
+            <p className="muted small">Choose a provider. You can add several accounts of the same provider — each one is listed separately.</p>
+          )}
           <div className="provider-grid">
             {providers.map((p) => (
-              <button key={p.id} className="provider-choice" onClick={() => (setPickedId(p.id), setSetup(p.needs_setup && !p.configured))}>
+              <button
+                key={p.id}
+                className="provider-choice"
+                onClick={() => (setPickedId(p.id), setSetup(p.needs_setup && !p.configured), setEmail(unknown ?? undefined))}
+              >
                 <Icon name={p.icon} size={24} />
                 <span className="provider-choice-text">
                   <strong>{p.name}</strong>
@@ -325,25 +417,32 @@ function AddAccountDialog({
       ) : (
         <div className="connector-flow">
           {!picked.needs_setup && <p className="muted small">{picked.help}</p>}
+          {picked.connect === "oauth" && picked.configured && !setup && (
+            <p className="muted small">
+              {email ? "Your browser opens Google's sign-in page for this account. " : "Your browser opens the sign-in page. "}
+              Approve access there, then come back to BRAIN2. BRAIN2 never sees your password.
+            </p>
+          )}
+          {(!picked.needs_setup || (picked.configured && !setup)) && (
+            <div className="connector-actions">
+              {picked.connect === "oauth" ? (
+                <OAuthConnect provider={picked} onDone={done} email={email} autoStart={!!email} />
+              ) : picked.connect === "password" ? (
+                <AppleConnect onDone={done} startOpen email={email} />
+              ) : (
+                <SecretConnect provider={picked} onDone={done} startOpen />
+              )}
+            </div>
+          )}
           {picked.needs_setup && (setup || !picked.configured) ? (
             <SetupForm provider={picked} onSaved={() => (setSetup(false), onChanged())} />
           ) : (
             picked.needs_setup && (
               <button className="link-button small" onClick={() => setSetup(true)}>
-                <Icon name="key" size={16} /> Your {picked.name} app credentials
+                <Icon name="key" size={16} />{" "}
+                {picked.builtin && !picked.own_app ? `Advanced: use your own ${picked.name} app` : `Your ${picked.name} app credentials`}
               </button>
             )
-          )}
-          {(!picked.needs_setup || (picked.configured && !setup)) && (
-            <div className="connector-actions">
-              {picked.connect === "oauth" ? (
-                <OAuthConnect provider={picked} onDone={done} />
-              ) : picked.connect === "password" ? (
-                <AppleConnect onDone={done} startOpen />
-              ) : (
-                <SecretConnect provider={picked} onDone={done} startOpen />
-              )}
-            </div>
           )}
         </div>
       )}
