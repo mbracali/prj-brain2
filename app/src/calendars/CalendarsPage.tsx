@@ -43,14 +43,15 @@ function step(view: CalView, cursor: Date, dir: number): Date {
 }
 
 // ---------------------------------------------------------------------------- calendar actions
-async function createCalendar() {
+async function createCalendar(open = false) {
   const name = await promptDialog("New calendar", { label: "Name", okLabel: "Create" });
   if (!name?.trim()) return;
   try {
     const used = new Set(useCalendars.getState().calendars.map((c) => c.color));
     const color = CALENDAR_COLORS.find((c) => !used.has(c)) ?? CALENDAR_COLORS[0];
-    await calendarApi.create({ name: name.trim(), color });
+    const created = await calendarApi.create({ name: name.trim(), color });
     await useCalendars.getState().load();
+    if (open) useApp.getState().navigate({ module: "calendar", calendarId: created.id });
   } catch (e) {
     reportError(e);
   }
@@ -118,10 +119,126 @@ function MiniMonth({ cursor, onPick }: { cursor: Date; onPick: (d: Date) => void
   );
 }
 
-// ---------------------------------------------------------------------------- page
-export function CalendarsPage() {
+// ---------------------------------------------------------------------------- home (list of calendars)
+function sourcesLabel(c: Calendar): string {
+  const accounts = new Set(c.sources.map((s) => s.account_id)).size;
+  if (!c.sources.length) return "Local events only";
+  return `${c.sources.length} connected calendar${c.sources.length === 1 ? "" : "s"} · ${accounts} account${accounts === 1 ? "" : "s"}`;
+}
+
+export function CalendarsHome() {
+  const { calendars, loaded } = useCalendars();
+  const navigate = useApp((s) => s.navigate);
+  const showMenu = useApp((s) => s.showMenu);
+  const [sourcesFor, setSourcesFor] = useState<string | null>(null);
+  useEffect(() => {
+    useCalendars.getState().load().catch(reportError);
+  }, []);
+  if (!loaded) return <div className="page center"><Spinner /></div>;
+  if (!calendars.length) return <FirstCalendar />;
+  const menu = (c: Calendar): MenuItem[] => [
+    { label: "Open", icon: "open_in_browser", action: () => navigate({ module: "calendar", calendarId: c.id }) },
+    { label: "Connected accounts…", icon: "manage_accounts", action: () => setSourcesFor(c.id) },
+    { label: "Sync now", icon: "sync", disabled: !c.sources.length, action: () => syncCalendars(c.id) },
+    { label: "Rename…", icon: "edit", action: async () => {
+      const name = await promptDialog("Rename calendar", { value: c.name, okLabel: "Rename" });
+      if (name?.trim()) patchCalendar(c, { name: name.trim() });
+    } },
+    { label: "Change icon…", icon: "mood", action: async () => {
+      const icon = await pickIcon(lastMenuPos, c.icon ?? "");
+      if (icon !== null) patchCalendar(c, { icon });
+    } },
+    { separator: true },
+    { label: "Delete calendar", icon: "delete", danger: true, action: () => deleteCalendar(c) },
+  ];
+  return (
+    <div className="page">
+      <div className="page-inner">
+        <div className="page-head">
+          <h1 className="page-title">Calendars</h1>
+          <div className="row">
+            <button className="btn" onClick={() => navigate({ module: "calendar", calendarId: ALL })}>
+              <Icon name="stacks" size={18} /> All calendars together
+            </button>
+            <button className="btn btn-primary" onClick={() => createCalendar(true)}>
+              <Icon name="add" size={18} /> New calendar
+            </button>
+          </div>
+        </div>
+        <div className="card-grid">
+          {calendars.map((c) => (
+            <button
+              key={c.id}
+              className="card cal-card"
+              style={{ "--cal": c.color } as React.CSSProperties}
+              onClick={() => navigate({ module: "calendar", calendarId: c.id })}
+              onContextMenu={(e) => (e.preventDefault(), showMenu(e, menu(c)))}
+            >
+              <UserIcon value={c.icon ?? ""} fallback="calendar_month" size={26} />
+              <strong>{c.name}</strong>
+              <span className="muted small">{sourcesLabel(c)}</span>
+              {c.sources.some((s) => s.error) && <span className="danger-text tiny">A connected account needs attention</span>}
+              <span
+                role="button"
+                className="icon-button card-sync"
+                title="Calendar options"
+                onClick={(e) => (e.stopPropagation(), showMenu(e, menu(c)))}
+              >
+                <Icon name="more_horiz" size={18} />
+              </span>
+            </button>
+          ))}
+        </div>
+        <button className="link-button small cal-accounts-link" onClick={() => useApp.getState().openSettings("connectors")}>
+          <Icon name="add_link" size={16} /> Account connectors…
+        </button>
+      </div>
+      {sourcesFor && <ConnectSourcesDialog calendarId={sourcesFor} onClose={() => setSourcesFor(null)} />}
+    </div>
+  );
+}
+
+function FirstCalendar() {
+  return (
+    <div className="page center">
+      <div className="hero">
+        <Icon name="calendar_month" size={56} />
+        <h2>Create your first calendar</h2>
+        <p className="muted">
+          A calendar can hold its own events and show events from your Google, Microsoft and Apple accounts — as many accounts as
+          you like, side by side.
+        </p>
+        <button className="btn btn-primary btn-large" onClick={() => createCalendar(true)}>
+          <Icon name="add" size={20} /> New calendar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+async function deleteCalendar(c: Calendar) {
+  const ok = await confirmDialog("Delete calendar", `Delete “${c.name}” and its local events? Connected accounts are not affected.`, { okLabel: "Delete", danger: true });
+  if (!ok) return;
+  try {
+    await calendarApi.remove(c.id);
+    await useCalendars.getState().load();
+    useCalendars.getState().bump();
+    const route = useApp.getState().route;
+    if (route.module === "calendar" && route.calendarId === c.id) useApp.getState().navigate({ module: "calendars" });
+  } catch (e) {
+    reportError(e);
+  }
+}
+
+// ---------------------------------------------------------------------------- one calendar (or all together)
+export const ALL = "all";
+
+export function CalendarPage({ calendarId }: { calendarId: string }) {
   const { calendars, loaded, view, cursor, version } = useCalendars();
   const showMenu = useApp((s) => s.showMenu);
+  const navigate = useApp((s) => s.navigate);
+  const all = calendarId === ALL;
+  const current = calendars.find((c) => c.id === calendarId) ?? null;
   const [events, setEvents] = useState<CalEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -135,7 +252,10 @@ export function CalendarsPage() {
   }, []);
 
   const days = useMemo(() => visibleDays(view, cursor), [view, cursor]);
-  const visibleIds = useMemo(() => calendars.filter((c) => c.visible).map((c) => c.id), [calendars]);
+  const visibleIds = useMemo(
+    () => (all ? calendars.filter((c) => c.visible).map((c) => c.id) : calendars.some((c) => c.id === calendarId) ? [calendarId] : []),
+    [calendars, all, calendarId],
+  );
   const rangeKey = `${days[0].getTime()}-${days.length}-${visibleIds.join(",")}-${version}`;
 
   useEffect(() => {
@@ -167,8 +287,8 @@ export function CalendarsPage() {
   const open = useCallback((ev: CalEvent, at: { x: number; y: number }) => setPopover({ ev, at }), []);
   const create = useCallback((d: EventDraft) => {
     if (!useCalendars.getState().calendars.length) return;
-    setDraft(d);
-  }, []);
+    setDraft(all ? d : { ...d, calendarId });
+  }, [all, calendarId]);
 
   const calendarMenu = (c: Calendar): MenuItem[] => [
     { label: "Rename…", icon: "edit", action: async () => {
@@ -187,32 +307,19 @@ export function CalendarsPage() {
       await useCalendars.getState().load();
     } },
     { separator: true },
-    { label: "Delete calendar", icon: "delete", danger: true, action: async () => {
-      const ok = await confirmDialog("Delete calendar", `Delete “${c.name}” and its local events? Connected accounts are not affected.`, { okLabel: "Delete", danger: true });
-      if (!ok) return;
-      try {
-        await calendarApi.remove(c.id);
-        await useCalendars.getState().load();
-        useCalendars.getState().bump();
-      } catch (e) {
-        reportError(e);
-      }
-    } },
+    { label: "Delete calendar", icon: "delete", danger: true, action: () => deleteCalendar(c) },
   ];
 
   if (!loaded) return <div className="page center"><Spinner /></div>;
-  if (!calendars.length) {
+  if (!calendars.length) return <FirstCalendar />;
+  if (!all && !current) {
     return (
       <div className="page center">
         <div className="hero">
-          <Icon name="calendar_month" size={56} />
-          <h2>Create your first calendar</h2>
-          <p className="muted">
-            A calendar can hold its own events and show events from your Google, Microsoft and Apple accounts — as many accounts as
-            you like, side by side.
-          </p>
-          <button className="btn btn-primary btn-large" onClick={createCalendar}>
-            <Icon name="add" size={20} /> New calendar
+          <Icon name="event_busy" size={56} />
+          <h2>Calendar not found</h2>
+          <button className="btn" onClick={() => navigate({ module: "calendars" })}>
+            <Icon name="arrow_back" size={18} /> All calendars
           </button>
         </div>
       </div>
@@ -225,13 +332,27 @@ export function CalendarsPage() {
   return (
     <div className="page cal-page">
       <aside className="cal-side">
+        <button className="cal-back" onClick={() => navigate({ module: "calendars" })} title="Back to the list of calendars">
+          <Icon name="arrow_back" size={18} /> Calendars
+        </button>
+        <div className="cal-side-title">
+          {all ? <Icon name="stacks" size={20} /> : <UserIcon value={current!.icon ?? ""} fallback="calendar_month" size={20} />}
+          <strong>{all ? "All calendars" : current!.name}</strong>
+          {!all && (
+            <button className="icon-button" title="Calendar options" onClick={(e) => showMenu(e, calendarMenu(current!))}>
+              <Icon name="more_horiz" size={17} />
+            </button>
+          )}
+        </div>
         <button className="btn btn-primary cal-new" onClick={() => create(newDraftAt(cursor, sameDay(cursor, today) ? Math.min(23, today.getHours() + 1) : 9))}>
           <Icon name="add" size={18} /> New event
         </button>
         <MiniMonth cursor={cursor} onPick={(d) => setCursor(d)} />
+        {all ? (
+          <>
         <div className="cal-list-head">
           <span>Calendars</span>
-          <button className="icon-button" title="New calendar" onClick={createCalendar}><Icon name="add" size={18} /></button>
+          <button className="icon-button" title="New calendar" onClick={() => createCalendar()}><Icon name="add" size={18} /></button>
         </div>
         <div className="cal-list">
           {calendars.map((c) => (
@@ -245,7 +366,7 @@ export function CalendarsPage() {
                 <span className="cal-check-box" />
               </label>
               {c.icon ? <UserIcon value={c.icon} fallback="calendar_month" size={16} /> : null}
-              <span className="cal-list-name" title={c.name}>{c.name}</span>
+              <button className="cal-list-name" title={`Open ${c.name}`} onClick={() => navigate({ module: "calendar", calendarId: c.id })}>{c.name}</button>
               {c.sources.length > 0 && (
                 <span className="cal-list-sources" title={c.sources.map((s) => `${s.remote_name} (${s.account_label})`).join("\n")}>
                   <Icon name={c.sources.some((s) => s.error) ? "cloud_off" : "cloud_sync"} size={15} />
@@ -257,6 +378,10 @@ export function CalendarsPage() {
             </div>
           ))}
         </div>
+          </>
+        ) : (
+          current && <CalendarSourcesList calendar={current} onManage={() => setSourcesFor(current.id)} />
+        )}
         <button className="link-button small cal-accounts-link" onClick={() => useApp.getState().openSettings("connectors")}>
           <Icon name="add_link" size={16} /> Account connectors…
         </button>
@@ -281,7 +406,7 @@ export function CalendarsPage() {
             title="Fetch events from the connected accounts"
             onClick={async () => {
               setSyncing(true);
-              await syncCalendars();
+              await syncCalendars(all ? undefined : calendarId);
               setSyncing(false);
             }}
           >
@@ -320,5 +445,50 @@ export function CalendarsPage() {
         </Modal>
       )}
     </div>
+  );
+}
+
+/** Left column of a single calendar: its local events plus every connected remote calendar, each can be toggled. */
+function CalendarSourcesList({ calendar, onManage }: { calendar: Calendar; onManage: () => void }) {
+  const toggle = async (sourceId: string, enabled: boolean) => {
+    try {
+      await calendarApi.updateSource(calendar.id, sourceId, { enabled });
+      await useCalendars.getState().load();
+      useCalendars.getState().bump();
+    } catch (e) {
+      reportError(e);
+    }
+  };
+  return (
+    <>
+      <div className="cal-list-head">
+        <span>Accounts</span>
+        <button className="icon-button" title="Connect accounts to this calendar" onClick={onManage}><Icon name="add" size={18} /></button>
+      </div>
+      <div className="cal-list">
+        <div className="cal-list-item">
+          <span className="cal-dot" style={{ background: calendar.color }} />
+          <span className="cal-list-name">Local events</span>
+        </div>
+        {calendar.sources.map((s) => (
+          <div key={s.id} className="cal-list-item" title={s.error ?? `${s.remote_name} — ${s.account_label}`}>
+            <label className="cal-check" style={{ "--cal": s.color ?? calendar.color } as React.CSSProperties}>
+              <input type="checkbox" checked={s.enabled} onChange={(e) => toggle(s.id, e.target.checked)} />
+              <span className="cal-check-box" />
+            </label>
+            <span className="cal-list-name">
+              {s.remote_name}
+              <span className="muted tiny cal-list-sub">{s.account_label}</span>
+            </span>
+            {s.error && <Icon name="cloud_off" size={15} className="danger-text" />}
+          </div>
+        ))}
+        {!calendar.sources.length && (
+          <button className="link-button small" onClick={onManage}>
+            <Icon name="add_link" size={16} /> Connect a Google, Microsoft or iCloud calendar
+          </button>
+        )}
+      </div>
+    </>
   );
 }

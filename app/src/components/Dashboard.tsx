@@ -1,3 +1,4 @@
+import { BrandIcon } from "./BrandIcon";
 import { vaultMenu } from "../vaultActions";
 import { modKey } from "../lib/bridge";
 import { useApp } from "../store";
@@ -16,7 +17,7 @@ export function Dashboard() {
     <div className="page">
       <div className="page-inner">
         <h1 className="page-title">
-          <Icon name="neurology" size={34} /> BRAIN2
+          <BrandIcon size={40} /> BRAIN2
         </h1>
         <p className="muted">Your personal assistant harness. Vaults and repos, with a terminal everywhere (Ctrl+`).</p>
         <div className="card-grid">

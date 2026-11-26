@@ -137,6 +137,33 @@ export function wrapSelection(view: EditorView, before: string, after = before):
   return true;
 }
 
+/** Characters that wrap a non-empty selection instead of replacing it (Obsidian's "auto pair Markdown syntax"). */
+export const WRAP_CHARS: Record<string, string> = { "*": "*", _: "_", "~": "~", "=": "=", "`": "`", $: "$", "%": "%" };
+
+/**
+ * Typing `*`, `_`, `~`, `=`, `` ` ``, `$` or `%` with text selected wraps the selection (and keeps it
+ * selected, so typing `*` twice makes it bold). Brackets and quotes are already handled by closeBrackets.
+ */
+export const wrapOnType = EditorView.inputHandler.of((view, _from, _to, text) => {
+  const close = WRAP_CHARS[text];
+  if (!close || view.composing) return false;
+  const { state } = view;
+  if (state.selection.ranges.some((r) => r.empty)) return false;
+  view.dispatch(
+    state.update(
+      state.changeByRange((range) => ({
+        changes: [
+          { from: range.from, insert: text },
+          { from: range.to, insert: close },
+        ],
+        range: EditorSelection.range(range.anchor + text.length, range.head + text.length),
+      })),
+      { scrollIntoView: true, userEvent: "input.type" },
+    ),
+  );
+  return true;
+});
+
 export const markdownKeymap = keymap.of([
   { key: "Mod-b", run: (v) => wrapSelection(v, "**") },
   { key: "Mod-i", run: (v) => wrapSelection(v, "*") },

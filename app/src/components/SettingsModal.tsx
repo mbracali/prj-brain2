@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { api } from "../lib/api";
-import { bridge, modKey } from "../lib/bridge";
+import { bridge, isNativeMobile, modKey, saveServer } from "../lib/bridge";
 import {
   BASE_PALETTES, BASE_SKINS, BUNDLED_FONTS, COMMON_FONTS, THEME_TOKENS, activeCustomTheme, localFonts, newCustomTheme,
   parseThemeJson, themeToJson,
@@ -419,6 +419,9 @@ export function SettingsModal() {
               <Row title="Show inline title" description="Display the file name as an editable title above the note.">
                 <Toggle value={settings.showInlineTitle} onChange={(v) => set("showInlineTitle", v)} />
               </Row>
+              <Row title="Show format bar" description="A floating bar above notes with bold, headings, lists, tables, callouts and more.">
+                <Toggle value={settings.showFormatBar} onChange={(v) => set("showFormatBar", v)} />
+              </Row>
               <Row title="Show line numbers">
                 <Toggle value={settings.showLineNumbers} onChange={(v) => set("showLineNumbers", v)} />
               </Row>
@@ -482,10 +485,21 @@ export function SettingsModal() {
                   <span>Version</span><code>{system.version}</code>
                   <span>Home</span>
                   <code className="link" onClick={() => bridge.openPath(system.home)}>{system.home}</code>
+                  <span>Your settings</span>
+                  <code className="link" title="Stored outside the app: updates never overwrite it" onClick={() => bridge.openPath(system.config_dir)}>
+                    {system.settings_file}
+                  </code>
                   <span>Index (SQLite)</span><code>{system.db}</code>
                   <span>Internal vaults</span><code>{system.internal_vaults}</code>
                   <span>Platform</span><code>{system.platform} · Python {system.python}</code>
                 </div>
+              )}
+              {isNativeMobile && (
+                <p>
+                  <button className="btn" onClick={() => (saveServer(null), location.reload())}>
+                    <Icon name="link_off" size={16} /> Connect to another BRAIN2 server
+                  </button>
+                </p>
               )}
               <h3>API &amp; MCP</h3>
               <p className="muted small">

@@ -1,0 +1,52 @@
+/* BRAIN2 icon theming
+   Usage: paste the SVG inline and add class="brain2-icon" to the <svg>.
+   Change colors by setting the three variables below, or pick a preset
+   with data-b2-theme="..." on the svg or any parent element. */
+
+/* Default (orange) */
+.brain2-icon {
+  --b2-bg: #EA580C;
+  --b2-fg: #FFFFFF;
+  --b2-accent: #FED7AA;
+
+  display: inline-block;
+  width: var(--b2-size, 64px);
+  height: var(--b2-size, 64px);
+}
+
+/* Smooth color changes when switching themes */
+.brain2-icon .b2-bg,
+.brain2-icon .b2-fg,
+.brain2-icon .b2-accent {
+  transition: fill 200ms ease, stroke 200ms ease;
+}
+
+/* Follow the OS dark mode unless a theme is set explicitly */
+@media (prefers-color-scheme: dark) {
+  .brain2-icon:not([data-b2-theme]) {
+    --b2-bg: #1E1B4B;
+    --b2-fg: #E0E7FF;
+    --b2-accent: #F0ABFC;
+  }
+}
+
+/* Presets */
+[data-b2-theme="orange"]  { --b2-bg: #EA580C; --b2-fg: #FFFFFF; --b2-accent: #FED7AA; }
+[data-b2-theme="dark"]    { --b2-bg: #1E1B4B; --b2-fg: #E0E7FF; --b2-accent: #F0ABFC; }
+[data-b2-theme="light"]   { --b2-bg: #F8FAFC; --b2-fg: #0F172A; --b2-accent: #EA580C; }
+[data-b2-theme="teal"]    { --b2-bg: #0F766E; --b2-fg: #F0FDFA; --b2-accent: #FDE68A; }
+[data-b2-theme="indigo"]  { --b2-bg: #4F46E5; --b2-fg: #FFFFFF; --b2-accent: #C7D2FE; }
+[data-b2-theme="mono"]    { --b2-bg: #111827; --b2-fg: #FFFFFF; --b2-accent: #9CA3AF; }
+
+/* Status states (e.g. sync, error) */
+[data-b2-state="syncing"] .b2-accent { animation: b2-pulse 1.2s ease-in-out infinite; }
+[data-b2-state="error"]   { --b2-accent: #F87171; }
+
+@keyframes b2-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-b2-state="syncing"] .b2-accent { animation: none; }
+}

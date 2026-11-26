@@ -15,9 +15,9 @@ dependencies and rebuilds the UI when the code changed, then starts the app:
 
 | OS | Shortcut |
 |---|---|
-| macOS | double-click `BRAIN2.command` (or drag it to the Dock / `alias brain2=…/brain2.sh`) |
+| macOS | double-click `BRAIN2.app` (drag it to the Dock or `/Applications`; it's created on first launch, or run `scripts/make-launcher.sh`). `BRAIN2.command` does the same without the icon. |
 | Linux / terminal | `./brain2.sh` (add `--detach` to return to the shell) |
-| Windows | double-click `BRAIN2.bat` |
+| Windows | double-click `BRAIN2.bat`; it then creates `BRAIN2.lnk` with the icon, which you can pin to the taskbar or Start |
 
 Or with `make`:
 
@@ -48,6 +48,19 @@ Data lives in `~/Brain2` (override with `BRAIN2_HOME` or `--home`):
   internal-vaults/    vaults created inside BRAIN2
   internal-repos/ internal-messages/ internal-calendars/ internal-boards/ internal-echoes/
 ```
+
+Your settings (preferences, custom themes, connector app IDs) are a plain `settings.json` in the
+OS's per-user config folder — never inside the installed app, so updating BRAIN2 can't overwrite
+them (Settings → About shows the exact path):
+
+| OS | Config folder |
+| --- | --- |
+| macOS | `~/Library/Application Support/BRAIN2` |
+| Windows | `%APPDATA%\BRAIN2` |
+| Linux | `$XDG_CONFIG_HOME/brain2` (`~/.config/brain2`) |
+
+Override with `BRAIN2_CONFIG_DIR`; a custom `--home` keeps its settings in `<home>/config`.
+Passwords, tokens and API keys are not stored there: they go to the OS keychain.
 
 ## Vaults (Wave 1)
 
@@ -105,6 +118,38 @@ Every vault operation is available over HTTP (`/api/…`, OpenAPI docs at `/docs
 events over WebSocket (`/api/events`), and as MCP tools (`list_vaults`, `read_file`, `write_file`,
 `search`, `backlinks`, `move`, …). Requests need `Authorization: Bearer <token>` (or `?token=`).
 
+## Releases and installers
+
+Pushing a version tag on `main` builds and publishes every platform as a GitHub Release
+(`.github/workflows/release.yml`):
+
+```bash
+git checkout main && git pull
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+| Platform | Files | Notes |
+| --- | --- | --- |
+| macOS (Apple silicon + Intel) | `.dmg`, `.zip` | Python is bundled: nothing else to install. |
+| Windows | `.exe` installer | Same: Python bundled. |
+| Linux | `.AppImage`, `.tar.gz` | Same. |
+| Android | `.apk`, `.aab` | Connects to a BRAIN2 server you run (`brain2 serve --host 0.0.0.0`). |
+
+- **Test builds without releasing:** GitHub → Actions → *Release* → *Run workflow*. The installers
+  are attached to the run.
+- **Tags must be on `main`:** the workflow refuses a tag that isn't, and stamps the tag's version into
+  the desktop app, the backend and Android.
+- **Signing:** builds work unsigned. Without signing secrets, macOS asks users to right-click →
+  *Open* the first time and Windows shows SmartScreen. Add the secrets listed at the top of the
+  workflow to sign and notarize.
+- **Local builds:**
+  - Backend binary: `python backend/packaging/build_backend.py`.
+  - Desktop installer: `cd app && npm run dist`.
+  - Android: `cd app && npm run android:sync`, then open `app/android` in Android Studio.
+- **Icons:** they come from `res/`. Regenerate the packaging PNGs with `scripts/make-icons.sh`, and the
+  Android icons with `node scripts/make-android-assets.mjs` followed by
+  `npx @capacitor/assets generate --android` (run in `app/`).
+
 ## Repository layout
 
 ```
@@ -129,5 +174,6 @@ service is allowed; charging for the code itself or modifications of it is not.
 ## Calendars and account connectors (wave 3)
 
 - **Settings → Account connectors** has three groups: *Account providers* (Google, Microsoft, Apple iCloud), *LLM providers* and *Chat providers* (can be connected; not used yet). Secrets live in the OS keychain.
-- Google and Microsoft use browser sign-in (OAuth + PKCE, loopback redirect) with **your own free app registration** (BRAIN2 has no company servers); the setup steps are shown in the app. Apple uses CalDAV with an app-specific password.
+- **Add account → type your email.** BRAIN2 finds the provider (Gmail and Google Workspace, Outlook and Microsoft 365, iCloud; custom domains via their MX records) and opens the browser straight on that account. Google and Microsoft use browser sign-in (OAuth + PKCE, loopback redirect: tokens go from the provider to your machine, never through a BRAIN2 server). Apple uses CalDAV with an app-specific password.
+- **Google sign-in client:** official builds ship BRAIN2's own Google client, so users need no setup. It's never committed: CI writes it from the `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` secrets, and developers install it with `python scripts/set-oauth-client.py <downloaded client_secret_….json>`. Without it, or under *Advanced*, users can enter their own Google app credentials.
 - **Calendars**: create any number; each one combines remote calendars from any number of accounts plus its own local events. Month / Week / Day / Agenda views; background sync every 15 minutes. Remote events are read-only for now.

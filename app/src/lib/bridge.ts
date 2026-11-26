@@ -18,8 +18,39 @@ declare global {
 }
 
 export const isElectron = !!window.brain2;
+/** Running inside the Android app (Capacitor): BRAIN2 talks to a server the user runs elsewhere. */
+export const isNativeMobile = !!(window as unknown as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.();
+
+const SERVER_KEY = "brain2-server";
+export interface SavedServer {
+  baseUrl: string;
+  token: string;
+}
+
+export function savedServer(): SavedServer | null {
+  try {
+    const raw = localStorage.getItem(SERVER_KEY);
+    const data = raw ? (JSON.parse(raw) as SavedServer) : null;
+    return data?.baseUrl ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveServer(server: SavedServer | null) {
+  try {
+    if (server) localStorage.setItem(SERVER_KEY, JSON.stringify(server));
+    else localStorage.removeItem(SERVER_KEY);
+  } catch {
+    /* storage unavailable */
+  }
+}
 
 function browserConfig() {
+  if (isNativeMobile) {
+    const server = savedServer();
+    return { baseUrl: server?.baseUrl ?? "", token: server?.token ?? "", platform: "android" };
+  }
   const params = new URLSearchParams(location.search);
   let token = params.get("token") || "";
   try {

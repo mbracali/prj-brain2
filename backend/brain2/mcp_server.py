@@ -18,7 +18,7 @@ from .vaults.service import VaultService
 def build_server(service: VaultService | None = None) -> MCPServer:
     if service is None:
         config = load_config()
-        service = VaultService(Database(config.db_path), config)
+        service = VaultService(Database(config.db_path, config.settings_path), config)
     svc = service
     mcp = MCPServer("brain2", instructions="Read and write the notes in the user's BRAIN2 vaults.")
 

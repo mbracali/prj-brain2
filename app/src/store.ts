@@ -18,6 +18,7 @@ export type Route =
   | { module: "repos" }
   | { module: "repo"; repoId: string; page?: RepoPage; arg?: string }
   | { module: "calendars" }
+  | { module: "calendar"; calendarId: string }
   | { module: "coming"; name: string };
 
 export type RepoPage = "files" | "commits" | "pushes" | "branches" | "tags" | "pulls";
@@ -148,11 +149,16 @@ export interface Tab {
   forward: string[];
   /** Pinned tabs stay at the left, can't be closed by Cmd+W and never get replaced by navigation. */
   pinned?: boolean;
+  /** Which side of a split view the tab lives in (0 = left/only pane, 1 = right pane). */
+  pane?: Pane;
   /** Line to scroll to after opening (from search/backlinks/outline). */
   focusLine?: number;
   focusHeading?: string;
   focusNonce?: number;
 }
+
+export type Pane = 0 | 1;
+const paneOf = (t: Tab): Pane => (t.pane === 1 ? 1 : 0);
 
 interface WorkspaceState {
   vaultId: string | null;
@@ -163,7 +169,11 @@ interface WorkspaceState {
   resolver: LinkResolver;
   revision: number;
   tabs: Tab[];
+  /** Active tab of the focused pane. */
   activeId: string | null;
+  /** Active tab of each pane (split view). */
+  paneActive: [string | null, string | null];
+  focusedPane: Pane;
   expanded: Record<string, boolean>;
   selected: string | null;
   leftTab: "files" | "search" | "tags";
@@ -183,6 +193,14 @@ interface WorkspaceState {
   closeTab(id: string, opts?: { force?: boolean }): void;
   togglePin(id: string): void;
   activate(id: string): void;
+  /** True when the right pane has tabs. */
+  isSplit(): boolean;
+  focusPane(pane: Pane): void;
+  /** Open the tab's document (default: the active one) in the other pane, like Obsidian's "Split right". */
+  splitRight(id?: string): void;
+  /** Move a tab to the other pane. */
+  moveToPane(id: string, pane: Pane): void;
+  closeSplit(): void;
   setMode(id: string, mode: ViewMode): void;
   goBack(): void;
   goForward(): void;
@@ -218,8 +236,12 @@ function persist(s: WorkspaceState) {
     localStorage.setItem(
       persistKey(s.vaultId),
       JSON.stringify({
-        tabs: s.tabs.map(({ id, type, path, mode, pinned }) => ({ id, type, path, mode, ...(pinned ? { pinned } : {}) })),
+        tabs: s.tabs.map(({ id, type, path, mode, pinned, pane }) => ({
+          id, type, path, mode, ...(pinned ? { pinned } : {}), ...(pane === 1 ? { pane } : {}),
+        })),
         activeId: s.activeId,
+        paneActive: s.paneActive,
+        focusedPane: s.focusedPane,
         expanded: s.expanded,
         leftOpen: s.leftOpen,
         rightOpen: s.rightOpen,
@@ -235,16 +257,42 @@ function restore(vaultId: string): Partial<WorkspaceState> {
     const raw = localStorage.getItem(persistKey(vaultId));
     if (!raw) return {};
     const data = JSON.parse(raw);
-    return {
+    return normalizePanes({
       tabs: (data.tabs ?? []).map((t: Tab) => ({ ...t, back: [], forward: [] })),
       activeId: data.activeId ?? null,
+      paneActive: Array.isArray(data.paneActive) ? data.paneActive : [data.activeId ?? null, null],
+      focusedPane: data.focusedPane === 1 ? 1 : 0,
       expanded: data.expanded ?? {},
       leftOpen: data.leftOpen ?? true,
       rightOpen: data.rightOpen ?? true,
-    };
+    } as WorkspaceState);
   } catch {
     return {};
   }
+}
+
+/**
+ * Keep the pane bookkeeping consistent after any change to the tab list: an empty right pane
+ * closes the split, an empty left pane takes over the right one, and each pane's active tab
+ * (and the focused pane's `activeId`) always points to a tab of that pane.
+ */
+function normalizePanes<T extends Pick<WorkspaceState, "tabs" | "activeId" | "paneActive" | "focusedPane">>(s: T): T {
+  let tabs = s.tabs;
+  if (!tabs.some((t) => paneOf(t) === 0) && tabs.some((t) => paneOf(t) === 1)) {
+    tabs = tabs.map((t) => ({ ...t, pane: undefined }));
+  }
+  const active: [string | null, string | null] = [null, null];
+  for (const pane of [0, 1] as Pane[]) {
+    const mine = tabs.filter((t) => paneOf(t) === pane);
+    const wanted = [s.activeId, s.paneActive?.[pane], s.paneActive?.[pane === 0 ? 1 : 0]];
+    active[pane] = wanted.map((id) => mine.find((t) => t.id === id)?.id).find(Boolean) ?? mine[mine.length - 1]?.id ?? null;
+  }
+  // activeId wins for its own pane.
+  const owner = tabs.find((t) => t.id === s.activeId);
+  if (owner) active[paneOf(owner)] = owner.id;
+  let focusedPane: Pane = owner ? paneOf(owner) : s.focusedPane;
+  if (!active[focusedPane]) focusedPane = active[0] ? 0 : 1;
+  return { ...s, tabs, paneActive: active, focusedPane, activeId: active[focusedPane] };
 }
 
 export const useWorkspace = create<WorkspaceState>((set, get) => ({
@@ -257,6 +305,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   revision: 0,
   tabs: [],
   activeId: null,
+  paneActive: [null, null],
+  focusedPane: 0,
   expanded: {},
   selected: null,
   leftTab: "files",
@@ -277,6 +327,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       loading: true,
       tabs: [],
       activeId: null,
+      paneActive: [null, null],
+      focusedPane: 0,
       expanded: {},
       selected: null,
       searchQuery: "",
@@ -293,8 +345,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     // Drop tabs whose files vanished while the vault was closed.
     const known = new Set(get().files.map((f) => f.path));
     const tabs = get().tabs.filter((t) => t.type !== "file" || known.has(t.path));
-    const activeId = tabs.find((t) => t.id === get().activeId)?.id ?? tabs[0]?.id ?? null;
-    set({ tabs, activeId });
+    set(normalizePanes({ ...get(), tabs }));
   },
   async loadIcons() {
     const id = get().vaultId;
@@ -326,7 +377,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const active = s.activeTab();
     let tabs: Tab[];
     let activeId: string;
-    const existing = s.tabs.find((t) => t.type === "file" && t.path === path);
+    const pane = s.focusedPane;
+    const existing = s.tabs.find((t) => t.type === "file" && t.path === path && paneOf(t) === pane);
     if (existing && !opts.newTab) {
       tabs = s.tabs.map((t) => (t.id === existing.id ? { ...t, ...focus } : t));
       activeId = existing.id;
@@ -346,31 +398,38 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
       );
       activeId = active.id;
     } else {
-      const tab: Tab = { id: newTabId(), type: "file", path, mode, back: [], forward: [], ...focus };
+      const tab: Tab = { id: newTabId(), type: "file", path, mode, back: [], forward: [], ...focus, ...(pane === 1 ? { pane } : {}) };
       tabs = [...s.tabs, tab];
       activeId = tab.id;
     }
     const expanded = { ...s.expanded };
     for (let d = dirname(path); d; d = dirname(d)) expanded[d] = true;
-    set({ tabs, activeId, selected: path, expanded });
+    set({ ...normalizePanes({ ...s, tabs, activeId }), selected: path, expanded });
     persist(get());
   },
   openGraph() {
     const s = get();
     const existing = s.tabs.find((t) => t.type === "graph");
-    if (existing) return set({ activeId: existing.id });
+    if (existing) return set(normalizePanes({ ...s, activeId: existing.id }));
 
-    const tab: Tab = { id: newTabId(), type: "graph", path: "", mode: "reading", back: [], forward: [] };
-    set({ tabs: [...s.tabs, tab], activeId: tab.id });
+    const tab: Tab = { id: newTabId(), type: "graph", path: "", mode: "reading", back: [], forward: [], ...(s.focusedPane === 1 ? { pane: 1 as Pane } : {}) };
+    set(normalizePanes({ ...s, tabs: [...s.tabs, tab], activeId: tab.id }));
     persist(get());
   },
   closeTab(id, opts = {}) {
     const s = get();
     const idx = s.tabs.findIndex((t) => t.id === id);
     if (idx < 0 || (s.tabs[idx].pinned && !opts.force)) return;
+    const closing = s.tabs[idx];
     const tabs = s.tabs.filter((t) => t.id !== id);
-    const activeId = s.activeId === id ? (tabs[idx] ?? tabs[idx - 1])?.id ?? null : s.activeId;
-    set({ tabs, activeId });
+    // Next tab of the same pane takes its place.
+    const siblings = s.tabs.filter((t) => paneOf(t) === paneOf(closing));
+    const at = siblings.findIndex((t) => t.id === id);
+    const next = (siblings[at + 1] ?? siblings[at - 1])?.id ?? null;
+    const paneActive = [...s.paneActive] as [string | null, string | null];
+    if (paneActive[paneOf(closing)] === id) paneActive[paneOf(closing)] = next;
+    const activeId = s.activeId === id ? next ?? paneActive[paneOf(closing) === 0 ? 1 : 0] : s.activeId;
+    set(normalizePanes({ ...s, tabs, activeId, paneActive }));
     persist(get());
   },
   togglePin(id) {
@@ -381,7 +440,41 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
   },
   activate(id) {
     const tab = get().tabs.find((t) => t.id === id);
-    set({ activeId: id, selected: tab?.path || get().selected });
+    set({ ...normalizePanes({ ...get(), activeId: id }), selected: tab?.path || get().selected });
+    persist(get());
+  },
+  isSplit() {
+    return get().tabs.some((t) => paneOf(t) === 1);
+  },
+  focusPane(pane) {
+    const s = get();
+    if (s.focusedPane === pane || !s.paneActive[pane]) return;
+    const tab = s.tabs.find((t) => t.id === s.paneActive[pane]);
+    set({ focusedPane: pane, activeId: s.paneActive[pane], selected: tab?.path || s.selected });
+    persist(get());
+  },
+  splitRight(id) {
+    const s = get();
+    const src = s.tabs.find((t) => t.id === (id ?? s.activeId));
+    if (!src) return;
+    const target: Pane = paneOf(src) === 0 ? 1 : 0;
+    const tab: Tab = { ...src, id: newTabId(), pinned: false, back: [], forward: [], pane: target === 1 ? 1 : undefined };
+    if (src.type === "graph") {
+      // Only one graph view: move it instead of duplicating.
+      return get().moveToPane(src.id, target);
+    }
+    set(normalizePanes({ ...s, tabs: [...s.tabs, tab], activeId: tab.id }));
+    persist(get());
+  },
+  moveToPane(id, pane) {
+    const s = get();
+    const tabs = s.tabs.map((t) => (t.id === id ? { ...t, pane: pane === 1 ? (1 as Pane) : undefined } : t));
+    set(normalizePanes({ ...s, tabs, activeId: id }));
+    persist(get());
+  },
+  closeSplit() {
+    const s = get();
+    set(normalizePanes({ ...s, tabs: s.tabs.map((t) => ({ ...t, pane: undefined })), focusedPane: 0, activeId: s.paneActive[0] ?? s.activeId }));
     persist(get());
   },
   setMode(id, mode) {
@@ -418,8 +511,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     const gone = (p: string) => p === path || p.startsWith(path + "/");
     const s = get();
     const tabs = s.tabs.filter((t) => t.type !== "file" || !gone(t.path));
-    const activeId = tabs.find((t) => t.id === s.activeId)?.id ?? tabs[tabs.length - 1]?.id ?? null;
-    set({ tabs, activeId });
+    set(normalizePanes({ ...s, tabs }));
     persist(get());
   },
   toggleFolder(path, open) {
@@ -428,8 +520,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => ({
     persist(get());
   },
   set(patch) {
-    set(patch);
-    if ("leftOpen" in patch || "rightOpen" in patch) persist(get());
+    if ("tabs" in patch || "activeId" in patch) set(normalizePanes({ ...get(), ...patch }));
+    else set(patch);
+    if ("leftOpen" in patch || "rightOpen" in patch || "tabs" in patch) persist(get());
   },
   activeTab() {
     const s = get();

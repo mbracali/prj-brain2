@@ -140,6 +140,11 @@ class VaultResolve(BaseModel):
 class OAuthStart(BaseModel):
     provider: str
     nickname: str | None = None
+    login_hint: str | None = None
+
+
+class DetectEmail(BaseModel):
+    email: str
 
 
 class AppleConnect(BaseModel):
@@ -205,13 +210,13 @@ def create_app(
     http=None,
 ) -> FastAPI:
     config = config or load_config()
-    db = Database(config.db_path)
+    db = Database(config.db_path, config.settings_path)
     bus = EventBus()
     vaults = VaultService(db, config, bus)
     terminals = TerminalManager(bus.publish)
     repos = RepoService(db, terminals, bus.publish)
     gitsync = VaultGitSync(vaults, terminals, bus.publish)
-    accounts = AccountService(db, secret_store or default_secrets(config.home), bus.publish, http)
+    accounts = AccountService(db, secret_store or default_secrets(config.config_dir), bus.publish, http)
     calendars = CalendarService(db, accounts, bus.publish)
 
     @asynccontextmanager
@@ -292,6 +297,8 @@ def create_app(
             "version": __version__,
             "home": str(config.home),
             "db": str(config.db_path),
+            "config_dir": str(config.config_dir),
+            "settings_file": str(config.settings_path),
             "internal_vaults": str(config.vaults_dir),
             "platform": platform.system(),
             "python": platform.python_version(),
@@ -606,7 +613,11 @@ def create_app(
 
     @app.post("/api/accounts/oauth/start", dependencies=[api])
     def oauth_start(body: OAuthStart):
-        return accounts.start_oauth(body.provider, body.nickname)
+        return accounts.start_oauth(body.provider, body.nickname, body.login_hint)
+
+    @app.post("/api/accounts/detect", dependencies=[api])
+    def detect_account(body: DetectEmail):
+        return accounts.detect(body.email)
 
     @app.get("/api/accounts/oauth/{flow_id}", dependencies=[api])
     def oauth_status(flow_id: str):

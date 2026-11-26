@@ -1,3 +1,4 @@
+import { BrandIcon } from "./BrandIcon";
 import { revealVault, vaultMenu } from "../vaultActions";
 import { isElectron, isMac } from "../lib/bridge";
 import { useApp } from "../store";
@@ -50,12 +51,12 @@ function ModuleList() {
   return (
     <div className="sidebar-body">
       <button className="brand" onClick={() => navigate({ module: "dashboard" })}>
-        <Icon name="neurology" size={22} /> <span>BRAIN2</span> <span className="version">v0.1</span>
+        <BrandIcon size={24} /> <span>BRAIN2</span> <span className="version">v{__APP_VERSION__}</span>
       </button>
       <nav className="module-list">
         {MODULES.map((m) => {
           const count = m.id === "vaults" ? vaults.length : m.id === "repos" ? repoCount : m.id === "calendars" ? calendarCount : 0;
-          const active = route.module === "coming" ? route.name === m.id : route.module === m.id;
+          const active = route.module === "coming" ? route.name === m.id : route.module === m.id || (m.id === "calendars" && route.module === "calendar");
           return (
             <button
               key={m.id}

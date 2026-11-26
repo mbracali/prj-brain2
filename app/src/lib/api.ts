@@ -15,7 +15,7 @@ import type {
   Blob, Branch, CommandResult, Commit, CommitDetail, PullList, PushEvent, Refs, Repo, RepoInspect, RepoTree, SyncResult,
   Tag, TerminalInfo, VaultGitStatus,
 } from "./repoTypes";
-import type { Account, CalEvent, Calendar, CalendarSource, Connectors, EventInput, OAuthFlow, OAuthStatus, RemoteCalendar } from "./calTypes";
+import type { Account, CalEvent, Calendar, CalendarSource, Connectors, DetectedProvider, EventInput, OAuthFlow, OAuthStatus, RemoteCalendar } from "./calTypes";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -152,8 +152,9 @@ export const accountsApi = {
   connectors: () => request<Connectors>("GET", "/api/connectors"),
   configureProvider: (provider: string, config: Record<string, string>) =>
     request<Connectors>("PUT", `/api/connectors/${provider}/config`, config),
-  startOAuth: (provider: string, nickname?: string) =>
-    request<OAuthFlow>("POST", "/api/accounts/oauth/start", { provider, nickname }),
+  startOAuth: (provider: string, nickname?: string, loginHint?: string) =>
+    request<OAuthFlow>("POST", "/api/accounts/oauth/start", { provider, nickname, login_hint: loginHint }),
+  detect: (email: string) => request<DetectedProvider>("POST", "/api/accounts/detect", { email }),
   oauthStatus: (flowId: string) => request<OAuthStatus>("GET", `/api/accounts/oauth/${flowId}`),
   connectApple: (body: { apple_id: string; app_password: string; nickname?: string }) =>
     request<Account>("POST", "/api/accounts/apple", body),

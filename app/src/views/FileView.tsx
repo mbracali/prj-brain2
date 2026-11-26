@@ -16,12 +16,13 @@ import {
   placeholder,
   spellcheckCompartment,
   vimCompartment,
+  wrapOnType,
 } from "../editor/setup";
 import { KanbanView } from "../kanban/KanbanView";
 import { isKanban } from "../kanban/format";
 import { renderMarkdown } from "../markdown/render";
 import { drawingSvg } from "../excalidraw/load";
-import { Prec } from "@codemirror/state";
+import { Prec, Transaction } from "@codemirror/state";
 import { vim } from "@replit/codemirror-vim";
 import { Suspense, lazy } from "react";
 
@@ -29,13 +30,14 @@ const ExcalidrawView = lazy(() => import("../excalidraw/ExcalidrawView"));
 import { Icon } from "../components/Icon";
 import { api, rawUrl } from "../lib/api";
 import { bridge, modKey } from "../lib/bridge";
-import { registerSaver, setActiveEditor } from "../lib/editorRegistry";
+import { minimalChange, onDocEdited, publishDoc, registerSaver, setActiveEditor } from "../lib/editorRegistry";
 import { onFilesChanged } from "../lib/events";
 import { AUDIO_EXTS, basename, dirname, displayName, extOf, splitExt } from "../lib/links";
 import type { FileEntry, FileKind, ViewMode } from "../lib/types";
 import { type MenuItem, type Tab, reportError, useApp, useWorkspace } from "../store";
 import { ReadingView, findHeadingLine } from "./ReadingView";
 import { CMEditor as CMEditorHost } from "./CMEditor";
+import { FormatBar } from "./FormatBar";
 
 const TEXT_KINDS: FileKind[] = ["markdown", "text", "json", "yaml", "excalidraw"];
 
@@ -230,9 +232,34 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
     [vaultId],
   );
 
+  // Edits made to the same file in the other pane of a split view.
+  const applyingRemote = useRef(false);
+  useEffect(
+    () =>
+      onDocEdited((path, next, source) => {
+        if (source === tab.id || path !== pathRef.current) return;
+        const view = viewRef.current;
+        const change = view ? minimalChange(view.state.doc.toString(), next) : null;
+        applyingRemote.current = true;
+        try {
+          if (view && change) view.dispatch({ changes: change, annotations: Transaction.addToHistory.of(false) });
+          // The other editor saves it; this copy is in sync.
+          window.clearTimeout(timer.current);
+          currentRef.current = savedRef.current = next;
+          setSaveState("saved");
+          setText(next);
+        } finally {
+          applyingRemote.current = false;
+        }
+      }),
+    [tab.id],
+  );
+
   const onChange = useCallback(
     (next: string) => {
+      if (applyingRemote.current) return;
       currentRef.current = next;
+      publishDoc(pathRef.current, next, tab.id);
       const dirty = next !== savedRef.current;
       setSaveState(dirty ? "dirty" : "saved");
       if (useWorkspace.getState().dirty[pathRef.current] !== dirty) {
@@ -279,6 +306,7 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
     if (isMarkdown) {
       ext.push(
         markdownKeymap,
+        wrapOnType,
         placeholder("Start writing…"),
         autocompletion({
           override: [
@@ -455,6 +483,7 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
     if (v && v.state.doc.toString() !== next) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: next } });
   };
   const kanbanSource = isMarkdown && !isDrawingSource && mode === "source" && isKanban(text);
+  const formatBar = isMarkdown && !isDrawingSource && !board && mode !== "reading" && settings.showFormatBar;
 
   const words = text.trim() ? (text.replace(/^---[\s\S]*?\n---/, "").match(/\S+/g)?.length ?? 0) : 0;
   const validation = file.kind === "json" ? validateJson(text) : file.kind === "yaml" ? validateYaml(text) : null;
@@ -499,11 +528,12 @@ function TextDocumentView({ tab, file, active }: { tab: Tab; file: FileEntry; ac
         }
       />
       <div
-        className={`view-content${isMarkdown && settings.readableLineLength && !board ? " readable" : ""}${
+        className={`view-content${formatBar ? " with-format-bar" : ""}${isMarkdown && settings.readableLineLength && !board ? " readable" : ""}${
           board ? " board-view" : isMarkdown && !isDrawingSource ? ` mode-${mode}` : " code-file"
         }`}
         ref={scrollRef}
       >
+        {formatBar && <FormatBar view={() => viewRef.current} />}
         {board && <KanbanView text={text} path={tab.path} onChange={replaceDoc} />}
         <div className="note-container" style={board ? { display: "none" } : undefined}>
           {isMarkdown && !isDrawingSource && settings.showInlineTitle && (

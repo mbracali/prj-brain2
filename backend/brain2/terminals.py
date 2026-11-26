@@ -93,16 +93,46 @@ def command_line(argv: list[str], flavor: str) -> str:
     return " ".join(parts)
 
 
+# Startup script typed into every new shell. Everything echoed before the "ready" marker is
+# dropped from the stream, so the user never sees it: we define the ``b2done`` helper, move to
+# the requested folder (rc files may have changed directory), leave any Python virtual env the
+# rc files activated, then clear the screen so the terminal opens clean.
 INIT = {
-    # Leading space keeps it out of history where the shell honours that.
-    "posix": " b2done() { printf '\\033]7337;%s;%s\\007' \"$1\" \"$2\"; }; printf '\\033]7337;ready;0\\007'; clear\r",
-    "fish": " function b2done; printf '\\e]7337;%s;%s\\a' $argv[1] $argv[2]; end; printf '\\e]7337;ready;0\\a'; clear\r",
+    "posix": (
+        " b2done() {{ printf '\\033]7337;%s;%s\\007' \"$1\" \"$2\"; }};{cd}"
+        " if type deactivate >/dev/null 2>&1; then deactivate >/dev/null 2>&1; fi;"
+        " if [ -n \"$CONDA_PREFIX\" ] && [ \"${{CONDA_SHLVL:-0}}\" -gt 0 ] 2>/dev/null; then"
+        " while [ \"${{CONDA_SHLVL:-0}}\" -gt 0 ]; do conda deactivate >/dev/null 2>&1 || break; done; fi;"
+        " unset VIRTUAL_ENV;"
+        " printf '\\033]7337;ready;0\\007'; clear\r"
+    ),
+    "fish": (
+        " function b2done; printf '\\e]7337;%s;%s\\a' $argv[1] $argv[2]; end;{cd}"
+        " functions -q deactivate; and deactivate >/dev/null 2>&1;"
+        " set -q CONDA_PREFIX; and type -q conda; and conda deactivate >/dev/null 2>&1;"
+        " set -e VIRTUAL_ENV;"
+        " printf '\\e]7337;ready;0\\a'; clear\r"
+    ),
     "powershell": (
-        " function b2done($i, $ok, $c) { if ($ok) { $c = 0 } elseif (-not $c) { $c = 1 }; "
-        "[Console]::Write([char]27 + ']7337;' + $i + ';' + $c + [char]7) }; "
-        "[Console]::Write([char]27 + ']7337;ready;0' + [char]7); Clear-Host\r"
+        " function b2done($i, $ok, $c) {{ if ($ok) {{ $c = 0 }} elseif (-not $c) {{ $c = 1 }}; "
+        "[Console]::Write([char]27 + ']7337;' + $i + ';' + $c + [char]7) }};{cd}"
+        " if (Get-Command deactivate -ErrorAction SilentlyContinue) {{ deactivate }};"
+        " if ($env:CONDA_PREFIX -and (Get-Command conda -ErrorAction SilentlyContinue)) {{ conda deactivate *> $null }};"
+        " Remove-Item Env:VIRTUAL_ENV -ErrorAction SilentlyContinue;"
+        " [Console]::Write([char]27 + ']7337;ready;0' + [char]7); Clear-Host\r"
     ),
 }
+
+
+def init_script(flavor: str, cwd: str | None) -> str:
+    cd = ""
+    if cwd:
+        if flavor == "powershell":
+            cd = f" Set-Location -LiteralPath {quote(cwd, flavor)};"
+        else:
+            cd = f" cd {quote(cwd, flavor)} 2>/dev/null;" if flavor == "posix" else f" cd {quote(cwd, flavor)};"
+    return INIT[flavor].format(cd=cd)
+
 
 SUFFIX = {
     "posix": "; b2done {id} $?",
@@ -114,6 +144,15 @@ SUFFIX = {
 def terminal_env() -> dict[str, str]:
     env = {k: v for k, v in os.environ.items() if not k.startswith(("ELECTRON_", "VITE_", "BRAIN2_TOKEN"))}
     env.pop("PYTHONUNBUFFERED", None)
+    # BRAIN2's backend may itself run inside a virtual env: never leak it into the user's shell.
+    venv = env.pop("VIRTUAL_ENV", None)
+    for k in ("VIRTUAL_ENV_PROMPT", "PYTHONHOME", "CONDA_PREFIX", "CONDA_DEFAULT_ENV", "CONDA_SHLVL",
+              "CONDA_PROMPT_MODIFIER", "_OLD_VIRTUAL_PATH", "_OLD_VIRTUAL_PS1"):
+        env.pop(k, None)
+    if venv:
+        bindir = os.path.join(venv, "Scripts" if IS_WINDOWS else "bin")
+        parts = env.get("PATH", "").split(os.pathsep)
+        env["PATH"] = os.pathsep.join(p for p in parts if os.path.normpath(p) != os.path.normpath(bindir))
     env.update({"TERM": "xterm-256color", "COLORTERM": "truecolor", "TERM_PROGRAM": "BRAIN2"})
     if not IS_WINDOWS:
         env.setdefault("LANG", "en_US.UTF-8")
@@ -195,7 +234,7 @@ class Terminal:
         self._pty = _Pty(shell, cwd, terminal_env(), cols, rows)
         threading.Thread(target=self._reader, name=f"term-{tid}", daemon=True).start()
         if self.flavor in INIT:
-            self._pty.write(INIT[self.flavor])
+            self._pty.write(init_script(self.flavor, cwd))
             threading.Timer(4.0, self._force_ready).start()
         else:
             self._ready.set()
@@ -396,9 +435,6 @@ class TerminalManager:
         term = Terminal(self, tid, title or Path(argv[0]).name.removesuffix(".exe"), cwd, key, argv)
         with self._lock:
             self._terms[tid] = term
-        if cwd != home and term.flavor in SUFFIX:
-            # Shell rc files may change directory: cd visibly once the shell is ready.
-            threading.Thread(target=lambda: term.run(["cd", cwd]), daemon=True).start()
         self.publish({"type": "terminals.changed"})
         return term
 

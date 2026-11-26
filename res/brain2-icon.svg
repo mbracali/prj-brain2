@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" role="img" aria-label="BRAIN2">
+  <!-- BRAIN2 icon (b2 monogram). Theme via CSS vars: b2-bg, b2-fg, b2-accent (prefixed with two dashes). -->
+  <style>
+    .b2-bg     { fill: var(--b2-bg, #EA580C); }
+    .b2-fg     { fill: none; stroke: var(--b2-fg, #FFFFFF); stroke-width: 56; stroke-linecap: round; }
+    .b2-accent { fill: none; stroke: var(--b2-accent, #FED7AA); stroke-width: 26; stroke-linecap: round; stroke-linejoin: round; }
+  </style>
+
+  <rect class="b2-bg" width="512" height="512" rx="112" ry="112"/>
+
+  <g class="b2-fg">
+    <line x1="168" y1="136" x2="168" y2="300"/>
+    <circle cx="262" cy="300" r="94"/>
+  </g>
+
+  <path class="b2-accent" d="M362 122 C362 92 422 90 422 124 C422 150 384 164 362 192 L426 192"/>
+</svg>

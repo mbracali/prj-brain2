@@ -6,3 +6,19 @@ __pycache__/
 *.pyc
 .pytest_cache/
 *.egg-info/
+# packaging outputs
+app/release/
+app/dist-mobile/
+backend/dist/
+backend/build/
+app/android/app/build/
+app/android/build/
+app/android/.gradle/
+app/android/local.properties
+# generated launchers (scripts/make-launcher.sh, BRAIN2.bat)
+BRAIN2.app/
+BRAIN2.lnk
+
+# Built-in OAuth client credentials (written by scripts/set-oauth-client.py or CI; never commit)
+backend/brain2/accounts/oauth_clients.json
+client_secret_*.json

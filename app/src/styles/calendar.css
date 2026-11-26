@@ -151,3 +151,18 @@
 .remote-cal-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 860px) { .cal-side { display: none; } }
+
+/* Calendars home + per-calendar page */
+.cal-back { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; padding: 4px 8px 4px 4px; border-radius: var(--radius-s);
+  font-size: 13px; color: var(--text-muted); }
+.cal-back:hover { background: var(--bg-hover); color: var(--text); }
+.cal-side-title { display: flex; align-items: center; gap: 8px; padding: 0 2px; font-size: 15px; }
+.cal-side-title strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-side-title > .icon:first-child, .cal-side-title > .emoji-icon:first-child { color: var(--accent); }
+button.cal-list-name { text-align: left; padding: 0; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
+button.cal-list-name:hover { text-decoration: underline; }
+.cal-list-name .cal-list-sub { display: block; overflow: hidden; text-overflow: ellipsis; }
+.cal-dot { width: 12px; height: 12px; border-radius: 3px; flex-shrink: 0; margin: 0 2px; }
+.cal-card > .icon, .cal-card > .emoji-icon { color: var(--cal); }
+.cal-card { border-top: 3px solid var(--cal); }
+.page-inner > .cal-accounts-link { margin-top: 18px; }

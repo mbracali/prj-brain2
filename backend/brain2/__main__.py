@@ -69,7 +69,7 @@ def main(argv: list[str] | None = None) -> None:
         from .vaults.service import VaultService
 
         config = load_config()
-        svc = VaultService(Database(config.db_path), config)
+        svc = VaultService(Database(config.db_path, config.settings_path), config)
         if args.cmd == "vaults":
             print(json.dumps(svc.list_vaults(), indent=2))
         elif args.cmd == "reindex":

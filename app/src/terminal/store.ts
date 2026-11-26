@@ -64,8 +64,14 @@ export const useTerminals = create<TerminalState>((set, get) => ({
   },
   setOpen(open) {
     store(OPEN_KEY, open ? "1" : "0");
+    const opening = open && !get().open;
     set({ open, maximized: open ? get().maximized : false });
-    if (open && !get().terminals.length) get().create({ cwd: contextFolder() }).catch(reportError);
+    if (!opening) return;
+    // Opening the panel shows a terminal in the folder you're looking at (the focused note's folder,
+    // the vault, the repo), reusing one that is already there.
+    const folder = contextFolder();
+    if (folder) get().openAt(folder).catch(reportError);
+    else if (!get().terminals.length) get().create().catch(reportError);
   },
   toggle() {
     get().setOpen(!get().open);
@@ -115,10 +121,11 @@ export const useTerminals = create<TerminalState>((set, get) => ({
   },
   async openAt(folder, title) {
     const key = `dir:${folder}`;
-    const existing = get().terminals.find((t) => t.key === key && t.alive);
+    const same = (a: string) => a.replace(/[\\/]+$/, "") === folder.replace(/[\\/]+$/, "");
+    const existing =
+      get().terminals.find((t) => t.key === key && t.alive) ?? get().terminals.find((t) => !t.key && t.alive && same(t.cwd));
     if (existing) {
       get().activate(existing.id);
-      await api.terminalCd(existing.id, folder).catch(reportError);
       return;
     }
     await get().create({ cwd: folder, key, title: title ?? (folder.split(/[\\/]/).filter(Boolean).pop() || folder) });

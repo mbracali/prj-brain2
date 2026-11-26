@@ -17,5 +17,18 @@ import "./styles/markdown.css";
 import "./styles/modules.css";
 import "./styles/calendar.css";
 import { App } from "./App";
+import { ConnectServer } from "./components/ConnectServer";
+import { isNativeMobile, savedServer } from "./lib/bridge";
 
-createRoot(document.getElementById("root")!).render(<App />);
+const root = createRoot(document.getElementById("root")!);
+// The Android app first needs to know which BRAIN2 server to use, and that it is reachable.
+const server = isNativeMobile ? savedServer() : null;
+if (isNativeMobile && !server) root.render(<ConnectServer />);
+else if (server) {
+  fetch(`${server.baseUrl}/api/health`, { signal: AbortSignal.timeout(6000) })
+    .then((r) => {
+      if (!r.ok) throw new Error();
+      root.render(<App />);
+    })
+    .catch(() => root.render(<ConnectServer error={`Can't reach ${server.baseUrl}. Is BRAIN2 running there?`} />));
+} else root.render(<App />);

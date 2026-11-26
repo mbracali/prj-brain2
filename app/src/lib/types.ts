@@ -115,6 +115,10 @@ export interface Settings {
   showLineNumbers: boolean;
   highlightActiveLine: boolean;
   showInlineTitle: boolean;
+  /** Floating bar with formatting buttons above markdown notes. */
+  showFormatBar: boolean;
+  /** Width of the left pane in split view (0.2–0.8). */
+  splitRatio: number;
   propertiesInDocument: "visible" | "hidden" | "source";
   strictLineBreaks: boolean;
   vimMode: boolean;
@@ -147,6 +151,8 @@ export const DEFAULT_SETTINGS: Settings = {
   showLineNumbers: false,
   highlightActiveLine: false,
   showInlineTitle: true,
+  showFormatBar: true,
+  splitRatio: 0.5,
   propertiesInDocument: "visible",
   strictLineBreaks: false,
   vimMode: false,
