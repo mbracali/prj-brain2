@@ -15,3 +15,6 @@ declare module "markdown-it-footnote" {
   const plugin: PluginSimple;
   export default plugin;
 }
+
+/** App version from package.json (set from the release tag by CI). */
+declare const __APP_VERSION__: string;

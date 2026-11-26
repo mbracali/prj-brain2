@@ -11,11 +11,20 @@ const isMac = process.platform === "darwin";
 const isWin = process.platform === "win32";
 const DEV_URL = process.env.VITE_DEV_SERVER_URL;
 const REPO_ROOT = path.resolve(__dirname, "..", "..");
+// Installed builds carry the frozen backend and the icon in the app's resources folder.
+const RESOURCES = app.isPackaged ? process.resourcesPath : path.join(__dirname, "..", "build");
+const ICON_PNG = path.join(RESOURCES, "icon.png");
 
 let backend = null;
 let backendConfig = null; // { baseUrl, token }
 
 // ---------------------------------------------------------------- backend
+/** The self-contained backend shipped inside installed builds (PyInstaller, see backend/packaging). */
+function bundledBackend() {
+  const exe = path.join(RESOURCES, "backend", isWin ? "brain2-server.exe" : "brain2-server");
+  return app.isPackaged && fs.existsSync(exe) ? exe : null;
+}
+
 function findPython() {
   if (process.env.BRAIN2_PYTHON) return process.env.BRAIN2_PYTHON;
   const venv = path.join(REPO_ROOT, "backend", ".venv", isWin ? "Scripts/python.exe" : "bin/python");
@@ -35,7 +44,7 @@ function freePort() {
   });
 }
 
-async function waitForHealth(baseUrl, timeoutMs = 20000) {
+async function waitForHealth(baseUrl, timeoutMs = app.isPackaged ? 60000 : 20000) {
   const deadline = Date.now() + timeoutMs;
   let lastErr;
   while (Date.now() < deadline) {
@@ -59,9 +68,14 @@ async function startBackend() {
   }
   const port = await freePort();
   const token = crypto.randomBytes(24).toString("base64url");
-  const python = findPython();
-  backend = spawn(python, ["-m", "brain2", "serve", "--port", String(port), "--token", token, "--exit-with-parent"], {
-    cwd: path.join(REPO_ROOT, "backend"),
+  const args = ["serve", "--port", String(port), "--token", token, "--exit-with-parent"];
+  const bundled = bundledBackend();
+  const [cmd, argv, cwd] = bundled
+    ? [bundled, args, path.dirname(bundled)]
+    : [findPython(), ["-m", "brain2", ...args], path.join(REPO_ROOT, "backend")];
+  backend = spawn(cmd, argv, {
+    cwd,
+    windowsHide: true,
     env: { ...process.env, PYTHONUNBUFFERED: "1" },
     stdio: ["ignore", "inherit", "inherit"],
   });
@@ -87,6 +101,7 @@ function createWindow(query = {}) {
     minHeight: 480,
     title: "BRAIN2",
     backgroundColor: "#1e1e1e",
+    ...(!isMac && fs.existsSync(ICON_PNG) ? { icon: ICON_PNG } : {}),
     titleBarStyle: isMac ? "hiddenInset" : "default",
     trafficLightPosition: { x: 14, y: 14 },
     webPreferences: {
@@ -241,13 +256,17 @@ if (!gotLock) {
 
   app.whenReady().then(async () => {
     app.setName("BRAIN2");
+    // Dev runs show Electron's icon in the Dock otherwise (installed builds use the bundle icon).
+    if (isMac && !app.isPackaged && fs.existsSync(ICON_PNG)) app.dock?.setIcon(ICON_PNG);
     try {
       await startBackend();
     } catch (err) {
       dialog.showErrorBox(
         "BRAIN2 could not start",
         `The Python backend failed to start.\n\n${err && err.message}\n\n` +
-          "Run `make setup` (or see README) to install the backend.",
+          (app.isPackaged
+            ? "Please reinstall BRAIN2 or report the problem at https://github.com/mbracali/prj-brain2/issues."
+            : "Run `make setup` (or see README) to install the backend."),
       );
       app.exit(1);
       return;

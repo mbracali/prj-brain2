@@ -1,0 +1,261 @@
+# Build and publish BRAIN2 for macOS, Windows, Linux and Android.
+#
+# Release: merge to main, then push a version tag that points at a commit on main:
+#     git tag v1.0.0 origin/main && git push origin v1.0.0
+# The workflow checks the tag is on main, stamps that version into every app, builds all
+# platforms and publishes them as a GitHub Release.
+#
+# "Run workflow" (manual) builds everything from the chosen branch without publishing:
+# the installers are attached to the run as artifacts so you can try them first.
+#
+# Optional repository secrets (builds still work without them, just unsigned):
+#   macOS signing + notarization: MAC_CERTIFICATE_P12 (base64), MAC_CERTIFICATE_PASSWORD,
+#                                 APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID
+#   Windows signing:              WINDOWS_CERTIFICATE_PFX (base64), WINDOWS_CERTIFICATE_PASSWORD
+#   Android signing:              ANDROID_KEYSTORE (base64), ANDROID_KEYSTORE_PASSWORD,
+#                                 ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to stamp into the test builds (no release is published)"
+        required: false
+        default: "0.0.0-test"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Check tag and version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: version
+        name: Resolve version
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+            git fetch --no-tags origin main
+            if ! git merge-base --is-ancestor "${GITHUB_SHA}" origin/main; then
+              echo "::error::Tag ${GITHUB_REF_NAME} is not on main. Merge to main first, then tag the merge commit."
+              exit 1
+            fi
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="${INPUT_VERSION:-0.0.0-test}"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'$VERSION' is not a version like 1.2.3 or 1.2.3-beta.1"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Building BRAIN2 $VERSION"
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+
+  test:
+    name: Tests
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Backend tests
+        working-directory: backend
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pytest -q
+      - name: UI typecheck and tests
+        working-directory: app
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    needs: [prepare, test]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple silicon
+            os: macos-15
+            args: --mac --arm64
+          - name: macOS Intel
+            os: macos-15-intel
+            args: --mac --x64
+          - name: Windows
+            os: windows-latest
+            args: --win --x64
+          - name: Linux
+            os: ubuntu-22.04 # older glibc: the AppImage runs on more distributions
+            args: --linux --x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Stamp version
+        run: node scripts/set-version.mjs "${{ needs.prepare.outputs.version }}"
+
+      - name: Build the backend (self-contained, no Python needed by users)
+        working-directory: backend
+        run: |
+          python -m pip install . pyinstaller
+          python packaging/build_backend.py
+
+      - name: Build the UI
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+
+      - name: Package
+        working-directory: app
+        shell: bash
+        env:
+          # macOS: signed + notarized when the certificate secrets exist, otherwise ad-hoc signed.
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CERTIFICATE_P12 || runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE_PFX || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CERTIFICATE_PASSWORD || runner.os == 'Windows' && secrets.WINDOWS_CERTIFICATE_PASSWORD || '' }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          EXTRA=()
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$CSC_LINK" ] && [ -n "$APPLE_ID" ]; then
+              EXTRA+=(-c.mac.notarize=true)
+            elif [ -z "$CSC_LINK" ]; then
+              export CSC_IDENTITY_AUTO_DISCOVERY=false
+              EXTRA+=(-c.mac.identity=-) # ad-hoc signature: required to run on Apple silicon
+            fi
+          fi
+          if [ -z "$CSC_LINK" ]; then unset CSC_LINK CSC_KEY_PASSWORD; fi
+          npx electron-builder ${{ matrix.args }} --publish never "${EXTRA[@]}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            app/release/*.dmg
+            app/release/*.zip
+            app/release/*.exe
+            app/release/*.AppImage
+            app/release/*.tar.gz
+            app/release/latest*.yml
+
+  android:
+    name: Android
+    needs: [prepare, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+
+      - name: Stamp version
+        run: node scripts/set-version.mjs "${{ needs.prepare.outputs.version }}"
+
+      - name: Build the UI for Android and sync it into the project
+        working-directory: app
+        run: |
+          npm ci
+          npm run android:sync
+
+      - name: Signing key
+        shell: bash
+        env:
+          ANDROID_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE" ]; then
+            echo "$ANDROID_KEYSTORE" | base64 --decode > "$RUNNER_TEMP/brain2.keystore"
+            echo "BRAIN2_ANDROID_KEYSTORE=$RUNNER_TEMP/brain2.keystore" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No ANDROID_KEYSTORE secret: the APK is signed with a debug key (installable, not for the Play Store)."
+          fi
+
+      - name: Build APK and App Bundle
+        working-directory: app/android
+        env:
+          BRAIN2_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          BRAIN2_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          BRAIN2_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease bundleRelease
+          mkdir -p out
+          cp app/build/outputs/apk/release/*.apk "out/BRAIN2-${{ needs.prepare.outputs.version }}-android.apk"
+          cp app/build/outputs/bundle/release/*.aab "out/BRAIN2-${{ needs.prepare.outputs.version }}-android.aab"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          if-no-files-found: error
+          path: app/android/out/*
+
+  publish:
+    name: Publish GitHub Release
+    needs: [prepare, desktop, android]
+    if: needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Checksums
+        working-directory: artifacts
+        run: |
+          rm -f latest*.yml # updater metadata differs per platform; not used yet
+          sha256sum * > SHA256SUMS.txt
+          ls -la
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: BRAIN2 ${{ needs.prepare.outputs.version }}
+          generate_release_notes: true
+          prerelease: ${{ contains(needs.prepare.outputs.version, '-') }}
+          files: artifacts/*
+          fail_on_unmatched_files: true

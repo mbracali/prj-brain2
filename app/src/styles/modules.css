@@ -246,3 +246,16 @@
 .connector-account-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
 .connector-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .connector-waiting { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-muted); }
+.connector-group-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.connector-empty { padding: 4px 2px; }
+.connector-account-provider { color: var(--accent); }
+.connector-account-kind { margin-left: 8px; font-weight: 400; }
+.add-account-dialog .modal-title, .add-account-dialog h2 { display: flex; align-items: center; gap: 8px; }
+.provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; margin-top: 10px; }
+.provider-choice { display: flex; align-items: center; gap: 12px; padding: 12px; text-align: left; border: 1px solid var(--border);
+  border-radius: var(--radius-m); background: var(--bg-secondary); }
+.provider-choice:hover { border-color: var(--accent); }
+.provider-choice > .icon { color: var(--accent); flex-shrink: 0; }
+.provider-choice-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.connector-flow { display: flex; flex-direction: column; gap: 12px; }
+.connector-flow > p { margin: 0; line-height: 1.5; }

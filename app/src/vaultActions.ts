@@ -3,7 +3,7 @@ import { api } from "./lib/api";
 import { bridge } from "./lib/bridge";
 import type { Vault } from "./lib/types";
 import { pickIcon } from "./components/IconPicker";
-import { useTerminals } from "./terminal/store";
+import { contextFolder, useTerminals } from "./terminal/store";
 import { startVaultSync } from "./vaultSync";
 import { type MenuItem, confirmDialog, lastMenuPos, promptDialog, reportError, useApp, useWorkspace } from "./store";
 
@@ -64,7 +64,15 @@ export function vaultMenu(v: Vault): MenuItem[] {
     { label: "Rename…", icon: "edit", action: () => renameVault(v) },
     { label: "Change icon…", icon: "mood", action: () => setVaultIcon(v) },
     { label: "Reveal in file manager", icon: "folder_open", action: () => revealVault(v) },
-    { label: "Open in terminal", icon: "terminal", action: () => useTerminals.getState().openAt(v.path, v.name).catch(reportError) },
+    {
+      label: "Open in terminal",
+      icon: "terminal",
+      // In the open vault: the focused note's folder (or the vault root when no note is focused).
+      action: () => {
+        const here = app.route.module === "vault" && app.route.vaultId === v.id ? contextFolder() : undefined;
+        useTerminals.getState().openAt(here ?? v.path, here && here !== v.path ? undefined : v.name).catch(reportError);
+      },
+    },
     ...(v.connections?.git?.length
       ? [{ label: "Sync with git", icon: "sync", action: () => startVaultSync(v.id) }]
       : [{ label: "Connect a git repository…", icon: "cloud_sync", action: () => app.openSettings("vaults") }]),

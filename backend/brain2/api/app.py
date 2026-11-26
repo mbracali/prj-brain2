@@ -205,13 +205,13 @@ def create_app(
     http=None,
 ) -> FastAPI:
     config = config or load_config()
-    db = Database(config.db_path)
+    db = Database(config.db_path, config.settings_path)
     bus = EventBus()
     vaults = VaultService(db, config, bus)
     terminals = TerminalManager(bus.publish)
     repos = RepoService(db, terminals, bus.publish)
     gitsync = VaultGitSync(vaults, terminals, bus.publish)
-    accounts = AccountService(db, secret_store or default_secrets(config.home), bus.publish, http)
+    accounts = AccountService(db, secret_store or default_secrets(config.config_dir), bus.publish, http)
     calendars = CalendarService(db, accounts, bus.publish)
 
     @asynccontextmanager
@@ -292,6 +292,8 @@ def create_app(
             "version": __version__,
             "home": str(config.home),
             "db": str(config.db_path),
+            "config_dir": str(config.config_dir),
+            "settings_file": str(config.settings_path),
             "internal_vaults": str(config.vaults_dir),
             "platform": platform.system(),
             "python": platform.python_version(),

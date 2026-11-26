@@ -97,6 +97,15 @@ export function commands(): Command[] {
         if (id) ws().togglePin(id);
       },
     },
+    { id: "split-right", name: "Split right (open note side by side)", icon: "splitscreen_right", when: () => !!activeFile(), run: () => ws().splitRight() },
+    {
+      id: "focus-other-pane",
+      name: "Focus the other pane",
+      icon: "swap_horiz",
+      when: () => ws().isSplit(),
+      run: () => ws().focusPane(ws().focusedPane === 0 ? 1 : 0),
+    },
+    { id: "close-split", name: "Close split view", icon: "close_fullscreen", when: () => ws().isSplit(), run: () => ws().closeSplit() },
     { id: "rename", name: "Rename file", icon: "edit", when: () => !!activeFile(), run: () => renamePath(activeFile()!, false) },
     { id: "delete", name: "Delete current file", icon: "delete", when: () => !!activeFile(), run: () => deletePath(activeFile()!, false) },
     { id: "copy-path", name: "Copy file path", icon: "content_copy", when: () => !!activeFile(), run: () => copyText(activeFile()!) },

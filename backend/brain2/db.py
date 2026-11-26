@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -99,8 +100,10 @@ CREATE VIRTUAL TABLE IF NOT EXISTS files_fts USING fts5(
 
 
 class Database:
-    def __init__(self, path: Path | str):
+    def __init__(self, path: Path | str, settings_file: Path | str | None = None):
+        """``settings_file``: user settings live in this JSON file (outside the index database)."""
         self.path = str(path)
+        self.settings_file = Path(settings_file) if settings_file else None
         self._conn = sqlite3.connect(self.path, check_same_thread=False, isolation_level=None)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
@@ -112,6 +115,10 @@ class Database:
                 "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
                 (str(SCHEMA_VERSION),),
             )
+        if self.settings_file and not self.settings_file.exists():
+            # One-time move: settings used to be stored in the database.
+            old = {r["key"]: json.loads(r["value"]) for r in self.query("SELECT key, value FROM settings")}
+            self._write_settings(old)
 
     @contextmanager
     def tx(self) -> Iterator[sqlite3.Connection]:
@@ -139,10 +146,46 @@ class Database:
             self._conn.execute(sql, params)
 
     # -- settings -------------------------------------------------------
+    def _read_settings(self) -> dict[str, Any]:
+        assert self.settings_file
+        try:
+            data = json.loads(self.settings_file.read_text("utf-8"))
+            return data if isinstance(data, dict) else {}
+        except FileNotFoundError:
+            return {}
+        except ValueError:
+            # Never overwrite a file the user broke by hand: keep a copy, then start clean.
+            backup = self.settings_file.with_name(f"settings.broken-{int(time.time())}.json")
+            try:
+                self.settings_file.replace(backup)
+            except OSError:
+                pass
+            return {}
+
+    def _write_settings(self, data: dict[str, Any]) -> None:
+        assert self.settings_file
+        self.settings_file.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.settings_file.with_name(self.settings_file.name + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False, sort_keys=True) + "\n", "utf-8")
+        tmp.replace(self.settings_file)
+
     def get_settings(self) -> dict[str, Any]:
+        if self.settings_file:
+            with self._lock:
+                return self._read_settings()
         return {r["key"]: json.loads(r["value"]) for r in self.query("SELECT key, value FROM settings")}
 
     def update_settings(self, values: dict[str, Any]) -> dict[str, Any]:
+        if self.settings_file:
+            with self._lock:
+                data = self._read_settings()
+                for k, v in values.items():
+                    if v is None:
+                        data.pop(k, None)
+                    else:
+                        data[k] = v
+                self._write_settings(data)
+                return data
         with self.tx() as c:
             for k, v in values.items():
                 if v is None:

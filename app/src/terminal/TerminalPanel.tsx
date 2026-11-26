@@ -27,22 +27,18 @@ function TerminalView({ id }: { id: string }) {
   return <div className="terminal-view" ref={ref} />;
 }
 
-export function TerminalPanel({ forced }: { forced?: boolean }) {
+/** Bottom terminal panel: shown only when the user opens it (or an action they started reveals it). */
+export function TerminalPanel() {
   const { terminals, activeId, open, height, maximized } = useTerminals();
   const settings = useApp((s) => s.settings);
   const [dragging, setDragging] = useState(false);
-  const visible = open || forced;
+  const visible = open;
 
   useEffect(() => {
     // Restyle after the theme variables have been applied.
     const t = setTimeout(restyleSessions, 50);
     return () => clearTimeout(t);
   }, [settings]);
-
-  useEffect(() => {
-    if (forced && !terminals.length) useTerminals.getState().create({ cwd: contextFolder() });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [forced]);
 
   if (!visible) return null;
 
@@ -119,11 +115,9 @@ export function TerminalPanel({ forced }: { forced?: boolean }) {
           <button className="icon-button" title={maximized ? "Restore panel size" : "Maximize panel"} onClick={() => t.setMaximized(!maximized)}>
             <Icon name={maximized ? "keyboard_arrow_down" : "keyboard_arrow_up"} size={18} />
           </button>
-          {!forced && (
-            <button className="icon-button" title={`Hide terminal (${modKey === "⌘" ? "⌃" : "Ctrl"}+\`)`} onClick={() => t.setOpen(false)}>
-              <Icon name="close" size={18} />
-            </button>
-          )}
+          <button className="icon-button" title={`Hide terminal (${modKey === "⌘" ? "⌃" : "Ctrl"}+\`)`} onClick={() => t.setOpen(false)}>
+            <Icon name="close" size={18} />
+          </button>
         </div>
       </header>
       <div className="terminal-body">

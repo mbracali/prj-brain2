@@ -11,9 +11,14 @@
     "build": "tsc --noEmit && vite build",
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "build:mobile": "tsc --noEmit && cross-env BRAIN2_TARGET=mobile vite build",
+    "dist": "npm run build && electron-builder --publish never",
+    "android:sync": "npm run build:mobile && cap sync android"
   },
   "dependencies": {
+    "@capacitor/android": "^7.6.11",
+    "@capacitor/core": "^7.6.11",
     "@codemirror/autocomplete": "^6.20.4",
     "@codemirror/commands": "^6.11.1",
     "@codemirror/lang-json": "^6.0.2",
@@ -48,6 +53,8 @@
     "zustand": "^5.1.0"
   },
   "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.6.11",
     "@types/d3-force": "^3.0.10",
     "@types/js-yaml": "^4.0.9",
     "@types/markdown-it": "^14.2.0",
@@ -57,10 +64,80 @@
     "concurrently": "^10.0.7",
     "cross-env": "^10.1.0",
     "electron": "^45.4.1",
+    "electron-builder": "^26.18.0",
     "sirv": "^3.0.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.1",
     "wait-on": "^9.5.1"
+  },
+  "author": "BRAIN2 contributors",
+  "homepage": "https://github.com/mbracali/prj-brain2",
+  "build": {
+    "appId": "app.brain2.desktop",
+    "productName": "BRAIN2",
+    "copyright": "BRAIN2 contributors — free and open source",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../backend/dist/brain2-server",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "asar": true,
+    "artifactName": "BRAIN2-${version}-${os}-${arch}.${ext}",
+    "mac": {
+      "icon": "../res/brain2-icon.icns",
+      "category": "public.app-category.productivity",
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "notarize": false
+    },
+    "dmg": {
+      "title": "BRAIN2 ${version}"
+    },
+    "win": {
+      "icon": "../res/brain2-icon.ico",
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "BRAIN2"
+    },
+    "linux": {
+      "icon": "build/icons",
+      "category": "Office",
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "synopsis": "Personal Assistant Harness — vaults, repos, calendars"
+    }
   }
 }

@@ -58,6 +58,11 @@ if newer_than "$APP/dist/index.html" "$APP/src" "$APP/index.html" "$APP/vite.con
   rm -f "$BUILD_LOG"
 fi
 
+# ---------------------------------------------------------------- macOS launcher with the icon
+if [ "$(uname)" = "Darwin" ] && newer_than "$ROOT/BRAIN2.app/Contents/Info.plist" "$ROOT/res/brain2-icon.icns" "$ROOT/scripts/make-launcher.sh"; then
+  "$ROOT/scripts/make-launcher.sh" >/dev/null && say "Created BRAIN2.app (drag it to the Dock to launch BRAIN2 with its icon)."
+fi
+
 # ---------------------------------------------------------------- launch
 cd "$APP"
 if [ "${1:-}" = "--detach" ]; then

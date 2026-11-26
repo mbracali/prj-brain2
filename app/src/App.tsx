@@ -17,7 +17,7 @@ import { VaultWorkspace } from "./views/VaultWorkspace";
 import { ReposHome } from "./repos/ReposHome";
 import { RepoView } from "./repos/RepoView";
 import { useRepos } from "./repos/store";
-import { CalendarsPage } from "./calendars/CalendarsPage";
+import { CalendarPage, CalendarsHome } from "./calendars/CalendarsPage";
 import { useCalendars } from "./calendars/store";
 import { TerminalPanel } from "./terminal/TerminalPanel";
 import { SyncConflictDialog } from "./vaultSync";
@@ -217,10 +217,11 @@ export function App() {
           <VaultWorkspace vaultId={route.vaultId} initialFile={route.vaultId === INITIAL_VAULT ? INITIAL_FILE : null} />
         )}
         {route.module === "repos" && <ReposHome />}
-        {route.module === "calendars" && <CalendarsPage />}
+        {route.module === "calendars" && <CalendarsHome />}
+        {route.module === "calendar" && <CalendarPage key={route.calendarId} calendarId={route.calendarId} />}
         {route.module === "repo" && <RepoView repoId={route.repoId} page={route.page ?? "files"} arg={route.arg} />}
         </div>
-        <TerminalPanel forced={route.module === "repos" || route.module === "repo"} />
+        <TerminalPanel />
       </main>
       <CreateVaultDialog />
       <SettingsModal />

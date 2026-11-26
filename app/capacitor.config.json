@@ -1,0 +1,11 @@
+{
+  "appId": "app.brain2.mobile",
+  "appName": "BRAIN2",
+  "webDir": "dist-mobile",
+  "server": {
+    "androidScheme": "http"
+  },
+  "android": {
+    "allowMixedContent": true
+  }
+}
